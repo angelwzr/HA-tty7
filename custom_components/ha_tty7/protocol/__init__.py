@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Literal, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 
 
 Status = Literal["idle", "working", "waiting", "done", "unknown"]
@@ -42,6 +42,7 @@ class AgentRecord(TypedDict):
     model: str | None
     effort: str | None
     permission_mode: str | None
+    inferred: NotRequired[bool]
 
 
 class Snapshot(TypedDict):
@@ -113,7 +114,7 @@ def _status(value: object, *, source: bool) -> Status:
 def _record_fields(
     pane_id: object, agent: object, state: dict, readout: dict, *, source: bool
 ) -> AgentRecord:
-    return AgentRecord(
+    record = AgentRecord(
         pane_id=cast(int, _integer(pane_id, positive=True)),
         agent=cast(str, _text(agent, 64)),
         session_id=_text(state.get("session_id"), 128, nullable=True),
@@ -124,6 +125,12 @@ def _record_fields(
         effort=_text(readout.get("effort"), 128, nullable=True),
         permission_mode=_text(readout.get("permission_mode"), 128, nullable=True),
     )
+    if "inferred" in state:
+        if type(state["inferred"]) is not bool:
+            raise PayloadError()
+        if state["inferred"]:
+            record["inferred"] = True
+    return record
 
 
 def _roster(value: object, *, source: bool) -> list[AgentRecord]:
@@ -146,7 +153,7 @@ def _roster(value: object, *, source: bool) -> list[AgentRecord]:
             elif not isinstance(readout, dict):
                 raise PayloadError()
         else:
-            if item.keys() != _AGENT_FIELDS:
+            if item.keys() - {"inferred"} != _AGENT_FIELDS:
                 raise PayloadError()
             state = readout = item
         record = _record_fields(item.get("pane_id"), item.get("agent"), state, readout, source=source)

@@ -40,6 +40,22 @@ def wire_agent(pane_id=7):
 
 
 class ContractTests(unittest.TestCase):
+    def test_inferred_source_status_survives_wire_revalidation(self):
+        record = wire_agent()
+        record["inferred"] = True
+        normalized = normalize_agents({"agents": [source_agent(inferred=True)]})
+        self.assertEqual(normalized, [record])
+        self.assertEqual(json.loads(encode_report(build_snapshot("host", normalized)))["agents"], [record])
+        self.assertEqual(normalize_agents({"agents": [source_agent(inferred=False)]}), [wire_agent()])
+
+    def test_invalid_inferred_provenance_rejects_the_whole_roster(self):
+        for value in (None, 0, 1, "false", [], {}):
+            with self.subTest(value=value):
+                self.assert_payload_error("invalid_payload", normalize_agents,
+                    {"agents": [source_agent(1), source_agent(2, inferred=value)]})
+                self.assert_payload_error("invalid_payload", build_snapshot,
+                    "host", [wire_agent(1), wire_agent(2) | {"inferred": value}])
+
     def assert_payload_error(self, code, function, *args):
         with self.assertRaises(PayloadError) as caught:
             function(*args)

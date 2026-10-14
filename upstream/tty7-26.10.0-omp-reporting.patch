@@ -1,0 +1,378 @@
+diff --git a/crates/tty7-core/src/core/agent_hooks.rs b/crates/tty7-core/src/core/agent_hooks.rs
+index 38bdd7b..d157138 100644
+--- a/crates/tty7-core/src/core/agent_hooks.rs
++++ b/crates/tty7-core/src/core/agent_hooks.rs
+@@ -214,6 +214,26 @@ fn build_hook_body(agent: &str, event: &str, stdin_json: &str) -> String {
+     if agent == "claude" {
+         claude_readout(event, &payload, &mut body);
+     }
++    if agent == "omp" {
++        // Only OMP's explicit scalar metadata: never serialize model objects,
++        // truncate identifiers, or pass through unrelated context fields.
++        for (key, max_chars) in [("model", 128), ("effort", 64)] {
++            if let Some(text) = payload
++                .get(key)
++                .and_then(|v| v.as_str())
++                .map(str::trim)
++                .filter(|text| {
++                    !text.is_empty()
++                        && text
++                            .chars()
++                            .enumerate()
++                            .all(|(i, c)| i < max_chars && !c.is_control())
++                })
++            {
++                body[key] = text.into();
++            }
++        }
++    }
+     body.to_string()
+ }
+ 
+@@ -2580,11 +2600,9 @@ export default { id: "tty7", server, setup }
+ 
+ /// The Pi extension bridge, shared with Oh My Pi.
+ ///
+-/// Oh My Pi is a fork of Pi and kept the extension contract intact — same
+-/// default-exported factory, same four lifecycle events, same
+-/// `ctx.sessionManager.getSessionId()`. Only the package it is imported from
+-/// and the slug the emitter is called with differ, so one template serves both
+-/// rather than two copies drifting apart.
++/// Pi and Oh My Pi share the factory, session id and core lifecycle events.
++/// OMP additionally exposes model/thinking metadata and marks nonterminal
++/// agent_end events with willContinue; its optional events differ from Pi's.
+ fn pi_extension_ts(target: &HookTarget, agent: HookAgent) -> Option<String> {
+     let (slug, package) = match agent {
+         // Pi moved from `@mariozechner/` to `@earendil-works/`. Current Pi
+@@ -2596,6 +2614,80 @@ fn pi_extension_ts(target: &HookTarget, agent: HookAgent) -> Option<String> {
+         _ => return None,
+     };
+     let exe = serde_json::to_string(&target.exe.display().to_string()).ok()?;
++    let omp = agent == HookAgent::OhMyPi;
++    let metadata = if omp {
++        r#"      const model = ctx?.model;
++      if (typeof model?.provider === "string" && typeof model.id === "string") {
++        const provider = model.provider.trim();
++        const id = model.id.trim();
++        if (provider && id) fields.model = `${provider}/${id}`;
++      }
++      const effort = pi.getThinkingLevel();
++      if (typeof effort === "string" && effort.trim()) fields.effort = effort;
++"#
++    } else {
++        ""
++    };
++    let run_state = if omp {
++        ""
++    } else {
++        r#"  // Some Pi builds send agent_settled only once the run is truly over.
++  let settles = false;
++"#
++    };
++    let agent_end = if omp {
++        r#"  pi.on("agent_end", (event, ctx) => {
++    // Automatic continuation is still working, not a completed turn.
++    if (event.willContinue !== true) emit((turn = "stop"), ctx);
++  });
++"#
++    } else {
++        r#"  pi.on("agent_end", (_event, ctx) => {
++    if (!settles) emit((turn = "stop"), ctx);
++  });
++"#
++    };
++    let optional_events = if omp {
++        r#"  // OMP's supported approval and retry events; no permission-mode guess.
++  pi.on("tool_approval_requested", (_event, ctx) => emit("permission-request", ctx));
++  pi.on("tool_approval_resolved", (_event, ctx) => emit(turn, ctx));
++  pi.on("auto_retry_start", (_event, ctx) => emit((turn = "prompt-submit"), ctx));
++  // Genuine tool progress refreshes tty7's activity clock without tool data.
++  pi.on("tool_execution_end", (_event, ctx) => emit("tool-complete", ctx));
++"#
++    } else {
++        r#"  // Guard optional Pi events so older builds keep their core hooks.
++  // Legacy Pi accepts guarded optional hooks absent from some releases' types.
++  const onOptional = pi.on.bind(pi) as unknown as (
++    name: string,
++    handler: (event: unknown, ctx: SessionCtx) => void,
++  ) => void;
++  try {
++    pi.on("ui_prompt_start", (event, ctx) => {
++      emit(event.kind === "confirm" ? "permission-request" : "question-asked", ctx);
++    });
++  } catch {}
++  // Restore the status the dialog interrupted, including an idle turn.
++  try {
++    pi.on("ui_prompt_end", (_event, ctx) => emit(turn, ctx));
++  } catch {}
++  try {
++    onOptional("agent_settled", (_event, ctx) => {
++      settles = true;
++      emit((turn = "stop"), ctx);
++    });
++  } catch {}
++  try {
++    onOptional("tool_approval_requested", (_event, ctx) =>
++      emit("permission-request", ctx),
++    );
++    onOptional("tool_approval_resolved", (_event, ctx) => emit(turn, ctx));
++    onOptional("auto_retry_start", (_event, ctx) =>
++      emit((turn = "prompt-submit"), ctx),
++    );
++  } catch {}
++"#
++    };
+     Some(format!(
+         r#"/* tty7 agent-hook {slug} bridge — generated by tty7, do not edit. */
+ import type {{ ExtensionAPI }} from "{package}";
+@@ -2605,14 +2697,21 @@ const EXE = {exe};
+ 
+ /** The slice of Pi's handler context we read — structural, so this bridge does
+  *  not depend on the context type staying exported. */
+-type SessionCtx = {{ sessionManager?: {{ getSessionId?(): string | undefined }} }};
++type SessionCtx = {{
++  sessionManager?: {{ getSessionId?(): string | undefined }};
++  model?: {{ provider: string; id: string }};
++}};
+ 
+-function emit(event: string, ctx?: SessionCtx): void {{
++export default function (pi: ExtensionAPI) {{
++  if (!process.env["TTY7"]) return;
++  function emit(event: string, ctx?: SessionCtx): void {{
+   try {{
+     let payload = "";
+     try {{
++      const fields: {{ session_id?: string; model?: string; effort?: string }} = {{}};
+       const id = ctx?.sessionManager?.getSessionId?.();
+-      if (id) payload = JSON.stringify({{ session_id: id }});
++      if (id) fields.session_id = id;
++{metadata}      if (fields.session_id || fields.model || fields.effort) payload = JSON.stringify(fields);
+     }} catch {{}}
+     const args = ["agent-hook", "{slug}", event];
+     // Nothing to send → leave stdin closed rather than handing the emitter a
+@@ -2623,28 +2722,16 @@ function emit(event: string, ctx?: SessionCtx): void {{
+       spawnSync(EXE, args, {{ stdio: ["ignore", "ignore", "ignore"] }});
+     }}
+   }} catch {{}}
+-}}
+-
+-export default function (pi: ExtensionAPI) {{
+-  if (!process.env["TTY7"]) return;
++  }}
+   // Extension load = the agent is running in this pane. No context here yet,
+   // so the id rides on session_start instead.
+   emit("session-start");
+   // What the pane showed before a UI prompt put it on "waiting", so closing
+   // the prompt can put it back.
+   let turn = "session-start";
+-  // Whether this build says when a run is over for good. agent_end also ends
+-  // each attempt an automatic retry, a compaction or a queued message picks
+-  // up again, and reading that as "done" calls the pane finished while it
+-  // still works. Pi's agent_settled comes once the run is really over, and a
+-  // build that sends it shows so the first time it does. Nothing earlier
+-  // tells: on() returns nothing in Pi or Oh My Pi, and a build that takes the
+-  // name without ever sending it must still end its turns on agent_end.
+-  let settles = false;
++{run_state}
+   pi.on("agent_start", (_event, ctx) => emit((turn = "prompt-submit"), ctx));
+-  pi.on("agent_end", (_event, ctx) => {{
+-    if (!settles) emit((turn = "stop"), ctx);
+-  }});
++{agent_end}
+   pi.on("session_shutdown", (_event, ctx) => emit("session-end", ctx));
+   // Last, and guarded: the three above already worked, so a Pi build that
+   // rejects this event name must not take them — or the whole extension —
+@@ -2652,41 +2739,7 @@ export default function (pi: ExtensionAPI) {{
+   try {{
+     pi.on("session_start", (_event, ctx) => emit("session-start", ctx));
+   }} catch {{}}
+-  // Pi-only: Oh My Pi may not expose the UI-prompt hooks, so each one is
+-  // guarded on its own — a fork that rejects the event name must not take the
+-  // rest of the bridge down with it. Without these the pane never reports
+-  // "waiting for you" while a dialog is open, and the event vocabulary already
+-  // carries question-asked / permission-request for exactly that.
+-  try {{
+-    pi.on("ui_prompt_start", (event, ctx) => {{
+-      emit(event.kind === "confirm" ? "permission-request" : "question-asked", ctx);
+-    }});
+-  }} catch {{}}
+-  // The dialog closed: restore what it interrupted. Not a blanket
+-  // prompt-submit — Pi also prompts while idle (/model, a command's select),
+-  // and that would leave a finished pane reading "working" with no turn to
+-  // ever end it.
+-  try {{
+-    pi.on("ui_prompt_end", (_event, ctx) => emit(turn, ctx));
+-  }} catch {{}}
+-  try {{
+-    pi.on("agent_settled" as any, (_event: unknown, ctx: SessionCtx) => {{
+-      settles = true;
+-      emit((turn = "stop"), ctx);
+-    }});
+-  }} catch {{}}
+-  // Oh My Pi asks before running a tool through events of its own rather
+-  // than Pi's UI-prompt pair, and announces its retries — which follow an
+-  // agent_end — where Pi does not.
+-  try {{
+-    pi.on("tool_approval_requested" as any, (_event: unknown, ctx: SessionCtx) =>
+-      emit("permission-request", ctx),
+-    );
+-    pi.on("tool_approval_resolved" as any, (_event: unknown, ctx: SessionCtx) => emit(turn, ctx));
+-    pi.on("auto_retry_start" as any, (_event: unknown, ctx: SessionCtx) =>
+-      emit((turn = "prompt-submit"), ctx),
+-    );
+-  }} catch {{}}
++{optional_events}
+ }}
+ "#
+     ))
+@@ -2970,6 +3023,98 @@ mod tests {
+         assert_eq!(ev.cwd.as_deref(), Some(std::path::Path::new("/w")));
+     }
+ 
++    #[test]
++    fn omp_metadata_preserves_only_allowlisted_input() {
++        let input = serde_json::json!({
++            "session_id": "omp-test-session",
++            "model": "openai/gpt-test",
++            "effort": "high",
++            "permission_mode": "invented",
++            "api_key": "excluded-test-secret",
++            "prompt": "excluded-test-prompt",
++            "transcript_path": "/excluded-test-transcript",
++            "context": { "model": { "api_key": "excluded-test-secret" } },
++        })
++        .to_string();
++        let body: serde_json::Value =
++            serde_json::from_str(&build_hook_body("omp", "prompt-submit", &input)).unwrap();
++        assert_eq!(
++            body,
++            serde_json::json!({
++                "v": 1,
++                "agent": "omp",
++                "event": "prompt-submit",
++                "session_id": "omp-test-session",
++                "model": "openai/gpt-test",
++                "effort": "high",
++            })
++        );
++    }
++
++    #[test]
++    fn omp_metadata_reaches_the_daemon() {
++        let input = r#"{"session_id":"omp-test-session","model":"openai/gpt-test","effort":"high"}"#;
++        let event = round_trip("omp", "prompt-submit", input);
++        assert_eq!(event.readout.model.as_deref(), Some("openai/gpt-test"));
++        assert_eq!(event.readout.effort.as_deref(), Some("high"));
++        assert_eq!(event.readout.permission_mode, None);
++    }
++
++    #[test]
++    fn omp_metadata_accepts_only_bounded_nonempty_text() {
++        for invalid in [
++            serde_json::Value::Null,
++            serde_json::json!({ "id": "not-a-string", "level": "high" }),
++            serde_json::json!(["not-a-string"]),
++            serde_json::json!(true),
++            serde_json::json!(42),
++            serde_json::json!(""),
++            serde_json::json!(" \t\n "),
++            serde_json::json!("not\nmetadata"),
++            serde_json::json!("not\u{001b}metadata"),
++        ] {
++            let input = serde_json::json!({ "model": invalid, "effort": invalid }).to_string();
++            let body: serde_json::Value =
++                serde_json::from_str(&build_hook_body("omp", "stop", &input)).unwrap();
++            assert!(body.get("model").is_none(), "{input}");
++            assert!(body.get("effort").is_none(), "{input}");
++        }
++        for (key, limit) in [("model", 128), ("effort", 64)] {
++            let mut input = serde_json::json!({});
++            input[key] = "x".repeat(limit).into();
++            let accepted: serde_json::Value =
++                serde_json::from_str(&build_hook_body("omp", "stop", &input.to_string())).unwrap();
++            assert_eq!(accepted[key], input[key]);
++            input[key] = "x".repeat(limit + 1).into();
++            let rejected: serde_json::Value =
++                serde_json::from_str(&build_hook_body("omp", "stop", &input.to_string())).unwrap();
++            assert!(rejected.get(key).is_none(), "{key} must not be truncated");
++        }
++        let input = r#"{"model":" openai/gpt-test ","effort":{"level":"high"}}"#;
++        let body: serde_json::Value =
++            serde_json::from_str(&build_hook_body("omp", "session-start", input)).unwrap();
++        assert_eq!(body["model"], "openai/gpt-test");
++        assert!(body.get("effort").is_none());
++        for input in ["not JSON", "null", "[]", "{}"] {
++            let body: serde_json::Value =
++                serde_json::from_str(&build_hook_body("omp", "session-start", input)).unwrap();
++            assert!(body.get("model").is_none());
++            assert!(body.get("effort").is_none());
++        }
++    }
++
++    #[test]
++    fn omp_metadata_does_not_change_other_agents_readouts() {
++        let input = r#"{"model":"openai/gpt-test","effort":"high","permission_mode":"invented"}"#;
++        for agent in ["pi", "prime-agent", "codex", "opencode"] {
++            let body: serde_json::Value =
++                serde_json::from_str(&build_hook_body(agent, "stop", input)).unwrap();
++            assert!(body.get("model").is_none(), "{agent}");
++            assert!(body.get("effort").is_none(), "{agent}");
++            assert!(body.get("permission_mode").is_none(), "{agent}");
++        }
++    }
++
+     /// Parses a built sequence back the way the terminal's scanner does.
+     fn round_trip(
+         agent: &str,
+@@ -4501,51 +4646,6 @@ mod tests {
+             "opencode no longer routes the emitter through sh"
+         );
+ 
+-        for (agent, slug, package) in [
+-            (HookAgent::Pi, "pi", "@earendil-works/pi-coding-agent"),
+-            (HookAgent::OhMyPi, "omp", "@oh-my-pi/pi-coding-agent"),
+-            (
+-                HookAgent::PrimeAgent,
+-                "prime-agent",
+-                "@earendil-works/pi-coding-agent",
+-            ),
+-        ] {
+-            let bridge =
+-                pi_extension_ts(&target, agent).unwrap_or_else(|| panic!("{slug} content builds"));
+-            assert!(bridge.contains(&format!("agent-hook {slug}")));
+-            assert!(bridge.contains(&format!(r#"["agent-hook", "{slug}", event]"#)));
+-            assert!(bridge.contains(&format!(r#"from "{package}""#)));
+-            assert!(bridge.contains(&exe));
+-            assert!(bridge.contains(r#"process.env["TTY7"]"#));
+-            assert!(bridge.contains("getSessionId"));
+-            assert!(bridge.contains("session_id"));
+-            assert!(bridge.contains(r#"stdio: ["pipe", "ignore", "ignore"]"#));
+-            for event in [
+-                "session_start",
+-                "agent_start",
+-                "agent_end",
+-                "session_shutdown",
+-                "ui_prompt_start",
+-                "ui_prompt_end",
+-                "agent_settled",
+-                "tool_approval_requested",
+-                "tool_approval_resolved",
+-                "auto_retry_start",
+-            ] {
+-                assert!(
+-                    bridge.contains(&format!(r#"pi.on("{event}""#)),
+-                    "{slug} bridge subscribes to {event}"
+-                );
+-            }
+-            assert!(
+-                bridge.contains(r#"pi.on("ui_prompt_end", (_event, ctx) => emit(turn, ctx))"#),
+-                "{slug} restores the pre-prompt status rather than forcing working"
+-            );
+-        }
+-        assert!(
+-            pi_extension_ts(&target, HookAgent::Claude).is_none(),
+-            "only the two Pi-shaped agents get this bridge"
+-        );
+ 
+         let grok = grok_hooks_json(&target).expect("grok content builds");
+         let parsed: serde_json::Value = serde_json::from_str(&grok).expect("valid JSON");

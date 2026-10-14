@@ -13,12 +13,14 @@ FILES = (
     "card/package.json", "card/package-lock.json", "card/tsconfig.json",
     "card/vite.config.ts", "card/playwright.config.ts", "card/index.html", "card/README.md",
     "integration-tests/README.md", "integration-tests/conftest.py",
+    "upstream/tty7-26.10.0-omp-reporting.patch",
+    "upstream/TTY7_LICENSE.txt",
 )
 DIRECTORIES = (
     "custom_components/ha_tty7", "collector", "deploy", "examples",
     "card/src", "card/test", "card/dev", "card/e2e", "integration-tests",
 )
-SUFFIXES = {".py", ".json", ".toml", ".service", ".ts", ".html", ".md", ".js", ".png", ".txt"}
+SUFFIXES = {".py", ".json", ".toml", ".service", ".ts", ".html", ".md", ".js", ".png", ".txt", ".patch"}
 FORBIDDEN_PARTS = {".git", ".storage", "__pycache__", "node_modules", ".pytest_cache", "test-results", "runtime"}
 
 

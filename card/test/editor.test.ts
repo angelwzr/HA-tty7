@@ -103,6 +103,36 @@ describe('native host discovery and picker consumer', () => {
     expect(card.shadowRoot!.textContent).toContain('Renamed label');
     expect(card.shadowRoot!.textContent).not.toContain('Laptop');
   });
+  it('persists title and appearance through selector edits, host edits and HA config echoes', async () => {
+    const editor = await mount({ type: 'custom:ha-tty7-card', hosts: [hostConfigs[0]], title: 'Saved title', appearance: 'home-assistant' });
+    const configs = listen(editor);
+    editor.addEventListener('config-changed', event => editor.setConfig((event as CustomEvent<{ config: CardConfig }>).detail.config));
+    const title = editor.shadowRoot!.querySelector('[data-field="title"]')!;
+    change(editor, 'title', 'My ');
+    await editor.updateComplete;
+    expect((title as HTMLElement & { value: string }).value).toBe('My ');
+    change(editor, 'title', 'My agents');
+    change(editor, 'appearance', 'tty7');
+    change(editor, 'name', 'Renamed host');
+    await editor.updateComplete;
+    expect(configs.at(-1)).toEqual({
+      type: 'custom:ha-tty7-card', title: 'My agents', appearance: 'tty7',
+      hosts: [{ ...hostConfigs[0], name: 'Renamed host' }],
+    });
+    expect(editor.shadowRoot!.querySelector('[data-field="title"]')).toBe(title);
+    const card = new HaTty7Card();
+    elements.push(card);
+    card.setConfig(configs.at(-1));
+    card.hass = registryFixture();
+    document.body.append(card);
+    await card.updateComplete;
+    expect(card.shadowRoot!.querySelector('h1')!.textContent).toBe('My agents');
+    change(editor, 'title', '');
+    await editor.updateComplete;
+    expect(configs.at(-1)).toEqual({
+      type: 'custom:ha-tty7-card', appearance: 'tty7', hosts: [{ ...hostConfigs[0], name: 'Renamed host' }],
+    });
+  });
   it('handles blank rows locally, selects complete pairs, and removes the last host without fake IDs', async () => {
     const editor = await mount();
     const configs = listen(editor);

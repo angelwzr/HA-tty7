@@ -5,26 +5,39 @@ import { css } from 'lit';
 // Neutral default pair / 3% rail tint and blue, green, amber roles follow the reference.
 export const cardStyles = css`
   :host {
-    display: block; min-width: 0; color-scheme: light;
+    display: block; min-width: 0;
+    font-family: var(--ha-font-family-body, system-ui, sans-serif); font-size: 14px;
+  }
+  :host(:not([appearance='home-assistant'])) {
+    color-scheme: light;
     --tty-bg: #fcfcfb; --tty-ink: #1c1c1e; --tty-rail: #f5f5f3;
     --tty-muted: #626267; --tty-line: #c5c5c4; --tty-hover: #ededec;
     --tty-blue: #1f6bf0; --tty-green: #2f8a52; --tty-amber: #b7791f; --tty-red: #c43c43;
-    font-family: var(--ha-font-family-body, system-ui, sans-serif); font-size: 14px;
   }
-  :host([dark]) {
+  :host([dark]:not([appearance='home-assistant'])) {
     color-scheme: dark; --tty-bg: #18181a; --tty-ink: #ececed; --tty-rail: #1e1e20;
     --tty-muted: #aaaab0; --tty-line: #505055; --tty-hover: #2b2b2e;
     --tty-blue: #78a8f5; --tty-green: #4cc27a; --tty-amber: #e0a345; --tty-red: #f07878;
   }
+  :host([appearance='home-assistant']) {
+    color-scheme: inherit;
+    --tty-ink: var(--primary-text-color); --tty-muted: var(--secondary-text-color);
+    --tty-rail: transparent; --tty-line: var(--divider-color);
+    --tty-hover: var(--secondary-background-color);
+    --tty-blue: var(--primary-color); --tty-green: var(--success-color);
+    --tty-amber: var(--warning-color); --tty-red: var(--error-color);
+  }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  ha-card { display: block; overflow: hidden; background: var(--tty-bg); color: var(--tty-ink);
-    border: 1px solid var(--tty-line); border-radius: var(--ha-card-border-radius, 12px); }
+  ha-card { display: block; overflow: hidden; }
+  :host(:not([appearance='home-assistant'])) ha-card {
+    background: var(--tty-bg); color: var(--tty-ink);
+    border: 1px solid var(--tty-line); border-radius: var(--ha-card-border-radius, 12px);
+  }
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
     padding: 12px 14px; border-bottom: 1px solid var(--tty-line); }
-  h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
+  h1 { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
   .brand { font-family: ui-monospace, 'Cascadia Code', 'DejaVu Sans Mono', monospace; font-weight: 700; }
-  .subtitle { color: var(--tty-muted); font-size: 12px; }
   label { display: grid; gap: 3px; min-width: 0; max-width: 52%; color: var(--tty-muted); font-size: 12px; }
   select { max-width: 100%; min-width: 0; min-height: 44px; padding: 7px; font: inherit;
     color: var(--tty-ink); background: var(--tty-rail); border: 1px solid var(--tty-line); border-radius: 5px; }
@@ -41,7 +54,7 @@ export const cardStyles = css`
   li { min-width: 0; border-radius: 5px; }
   .agent-row { display: grid; width: 100%; grid-template-columns: 26px minmax(0, 1fr) auto 12px;
     align-items: center; gap: 9px; min-height: 58px; padding: 8px;
-    border: 0; border-radius: 5px; text-align: left; color: inherit; background: transparent; cursor: pointer; font: inherit; }
+    border: 0; border-radius: 5px; text-align: left; color: var(--tty-ink); background: transparent; cursor: pointer; font: inherit; }
   .agent-row:hover, .agent-row[aria-expanded='true'] { background: var(--tty-hover); }
   button:focus-visible, select:focus-visible { outline: 2px solid var(--tty-blue); outline-offset: -2px; }
   .agent-icon { width: 24px; height: 24px; border: 1px solid var(--tty-line); border-radius: 6px;

@@ -17,6 +17,17 @@ describe('configuration boundary', () => {
   it('accepts an empty editor draft without inventing entities', () => {
     expect(validateConfig({ type: 'custom:ha-tty7-card', hosts: [] })).toEqual({ type: 'custom:ha-tty7-card', hosts: [] });
   });
+  it('roundtrips optional presentation settings without changing old saved configs', () => {
+    const saved = { type: 'custom:ha-tty7-card', hosts: [host], title: 'My agents', appearance: 'home-assistant' };
+    expect(validateConfig(saved)).toEqual(saved);
+    expect(validateConfig({ type: 'custom:ha-tty7-card', hosts: [host] })).toEqual({ type: 'custom:ha-tty7-card', hosts: [host] });
+  });
+  it.each([
+    { title: 42 }, { title: null }, { title: '' }, { title: ' ' }, { title: 'x'.repeat(129) }, { title: '\ud800' },
+    { appearance: 'native' }, { appearance: null }, { appearance: 1 },
+  ])('rejects invalid presentation settings %j', settings => {
+    expect(() => validateConfig({ type: 'custom:ha-tty7-card', hosts: [host], ...settings })).toThrowError(Error);
+  });
   it.each([
     {},
     { type: 'custom:ha-tty7-card', hosts: [{ ...host, roster_entity: 'light.demo' }] },
@@ -114,6 +125,11 @@ describe('host presentation states', () => {
   });
   it.each([{ turns: true }, { model: {} }, { session_id: '' }, { model: 'x'.repeat(129) }])('rejects incompatible optional metadata %j', change => {
     expect(view(attributes({ agents: [{ ...agentFixture(), ...change }] })).state).toBe('malformed');
+  });
+  it.each([null, 'true', 1, {}])('rejects a non-boolean inferred flag %j without discarding the malformed record', inferred => {
+    const states = fixtureStates('healthy');
+    (states[host.roster_entity]!.attributes.agents as Record<string, unknown>[])[0]!.inferred = inferred;
+    expect(view(states).state).toBe('malformed');
   });
   it('maps unknown or absent status to a fixed unknown label, never successful', () => {
     const states = fixtureStates('healthy');

@@ -32,6 +32,8 @@ export class HaTty7CardEditor extends LitElement {
   private rows: HostRow[] = [];
   private nextId = 0;
   private feedback = '';
+  private cardTitle = '';
+  private appearance: CardConfig['appearance'];
 
   set hass(value: HomeAssistant | undefined) { this.currentHass = value; this.requestUpdate(); }
   get hass(): HomeAssistant | undefined { return this.currentHass; }
@@ -39,6 +41,9 @@ export class HaTty7CardEditor extends LitElement {
   setConfig(value: unknown): void {
     // HA calls the editor with partial drafts. Keep only dashboard fields, never spread config/options.
     const hosts = record(value) && Array.isArray(value.hosts) ? value.hosts.slice(0, 64) : [];
+    const title = record(value) ? text(value.title, 128) : '';
+    this.cardTitle = this.cardTitle.trim() === title ? this.cardTitle : title;
+    this.appearance = record(value) && (value.appearance === 'tty7' || value.appearance === 'home-assistant') ? value.appearance : undefined;
     const previousRows = this.rows;
     this.rows = hosts.filter(record).map((host, index) => {
       const previous = previousRows.find(row => row.host.roster_entity === host.roster_entity
@@ -58,9 +63,13 @@ export class HaTty7CardEditor extends LitElement {
   private publish(): void {
     let config: CardConfig;
     try {
-      config = validateConfig({ type: 'custom:ha-tty7-card', hosts: this.rows.map(row => row.host) });
+      config = validateConfig({
+        type: 'custom:ha-tty7-card', hosts: this.rows.map(row => row.host),
+        ...(this.cardTitle.trim() ? { title: this.cardTitle } : {}),
+        ...(this.appearance ? { appearance: this.appearance } : {}),
+      });
     } catch {
-      this.feedback = 'Choose a host pair and a unique, non-empty label for each row.';
+      this.feedback = 'Use a title of at most 128 characters and choose a host pair with a unique, non-empty label for each row.';
       this.requestUpdate();
       return;
     }
@@ -90,6 +99,20 @@ export class HaTty7CardEditor extends LitElement {
     this.publish();
   }
 
+  private titleChanged(event: CustomEvent<{ value: unknown }>): void {
+    event.stopPropagation();
+    if (typeof event.detail.value !== 'string') return;
+    this.cardTitle = event.detail.value;
+    this.publish();
+  }
+
+  private appearanceChanged(event: CustomEvent<{ value: unknown }>): void {
+    event.stopPropagation();
+    if (event.detail.value !== 'tty7' && event.detail.value !== 'home-assistant') return;
+    this.appearance = event.detail.value;
+    this.publish();
+  }
+
   private addRow(): void {
     if (this.rows.length >= 64) return;
     const row = { id: this.nextId++, host: { name: '', roster_entity: '', connectivity_entity: '' } };
@@ -109,6 +132,13 @@ export class HaTty7CardEditor extends LitElement {
     const hosts = discoverHosts(this.currentHass);
     return html`
       <p>Choose HA-tty7 hosts and dashboard labels. Only status is shown; pairing credentials stay in integration settings.</p>
+      <ha-selector data-field="title" .hass=${this.currentHass} .label=${'Card title (default: tty7 agents)'}
+        .selector=${{ text: {} }} .value=${this.cardTitle}
+        @value-changed=${this.titleChanged}></ha-selector>
+      <ha-selector data-field="appearance" .hass=${this.currentHass} .label=${'Appearance'}
+        .selector=${{ select: { options: [{ value: 'tty7', label: 'tty7' }, { value: 'home-assistant', label: 'Home Assistant' }],
+          mode: 'dropdown', custom_value: false } }} .value=${this.appearance ?? 'tty7'}
+        @value-changed=${this.appearanceChanged}></ha-selector>
       ${!hosts.length ? html`<p role="status">No configured HA-tty7 host pairs are available. Add a host in
         <a href="/config/integrations">Settings · Devices & services</a>, then return to this editor.
         Saved entity pairs remain unchanged.</p>` : nothing}

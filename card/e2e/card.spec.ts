@@ -72,3 +72,99 @@ test('privacy boundary excludes unrelated entities and unwanted fields', async (
   expect(text).toContain('OhMyPi');
   for (const marker of ['PRIVATE_MESSAGE', 'PRIVATE_DIRECTORY', 'PRIVATE_ARGUMENT', 'PRIVATE_ICON', 'PRIVATE_HOST']) expect(text).not.toContain(marker);
 });
+
+test('native appearance leaves surface styling to ha-card and follows live HA theme colors', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const card = document.querySelector('ha-tty7-card')!;
+    // A consumer boundary, not a substitute HA implementation: the inner element owns its surface.
+    const surface = card.shadowRoot!.querySelector('ha-card')!;
+    surface.attachShadow({ mode: 'open' }).innerHTML = `<style>:host {
+      background: var(--ha-card-background); border: 3px solid var(--ha-card-border-color);
+      box-shadow: var(--ha-card-box-shadow); border-radius: var(--ha-card-border-radius);
+      color: var(--primary-text-color);
+    }</style><slot></slot>`;
+    const theme: Record<string, string> = {
+      '--ha-card-background': 'rgb(11, 22, 33)', '--ha-card-border-color': 'rgb(44, 55, 66)',
+      '--ha-card-box-shadow': 'rgb(77, 88, 99) 0px 2px 4px', '--ha-card-border-radius': '23px',
+      '--primary-text-color': 'rgb(100, 110, 120)', '--secondary-text-color': 'rgb(130, 140, 150)',
+      '--divider-color': 'rgb(44, 55, 66)', '--primary-color': 'rgb(160, 170, 180)',
+      '--success-color': 'rgb(20, 130, 40)', '--warning-color': 'rgb(150, 120, 20)', '--error-color': 'rgb(190, 30, 40)',
+    };
+    for (const [key, value] of Object.entries(theme)) card.style.setProperty(key, value);
+    const hosts = [...card.shadowRoot!.querySelectorAll('section')].map(section => {
+      const name = section.getAttribute('aria-label')!;
+      const roster_entity = name === 'Desktop' ? 'sensor.ha_tty7_desktop_demo_roster' : 'sensor.ha_tty7_laptop_demo_roster';
+      return { name, roster_entity, connectivity_entity: roster_entity.replace('sensor.', 'binary_sensor.').replace('_roster', '_connectivity') };
+    });
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts, appearance: 'home-assistant' });
+    await card.updateComplete;
+  });
+  const card = page.locator('ha-tty7-card');
+  const surface = card.locator('ha-card');
+  await expect(surface).toHaveCSS('background-color', 'rgb(11, 22, 33)');
+  await expect(surface).toHaveCSS('border-top-width', '3px');
+  await expect(surface).toHaveCSS('border-top-color', 'rgb(44, 55, 66)');
+  await expect(surface).toHaveCSS('border-radius', '23px');
+  await expect(surface).toHaveCSS('box-shadow', 'rgb(77, 88, 99) 0px 2px 4px 0px');
+  await expect(card.locator('.agent-name').first()).toHaveCSS('color', 'rgb(100, 110, 120)');
+  await expect(card.locator('.receipt').first()).toHaveCSS('color', 'rgb(130, 140, 150)');
+  await expect(card.locator('[data-status="working"] .dot').first()).toHaveCSS('background-color', 'rgb(160, 170, 180)');
+  await expect(card.locator('[data-status="done"] .dot').first()).toHaveCSS('background-color', 'rgb(20, 130, 40)');
+  await expect(card.locator('[data-status="waiting"] .dot').first()).toHaveCSS('background-color', 'rgb(150, 120, 20)');
+  await page.evaluate(() => {
+    const card = document.querySelector('ha-tty7-card')!;
+    card.style.setProperty('--ha-card-background', 'rgb(230, 240, 250)');
+    card.style.setProperty('--primary-color', 'rgb(80, 90, 100)');
+    card.hass = { ...card.hass!, themes: { darkMode: true } };
+  });
+  await expect(surface).toHaveCSS('background-color', 'rgb(230, 240, 250)');
+  await expect(card.locator('[data-status="working"] .dot').first()).toHaveCSS('background-color', 'rgb(80, 90, 100)');
+});
+
+test.describe('HA locale receipt display', () => {
+  test.use({ timezoneId: 'America/Los_Angeles', locale: 'en-US' });
+  test('reformats both timestamps on profile changes without changing roster data', async ({ page }) => {
+    await page.goto('/?scenario=error');
+    await page.evaluate(async () => {
+      const card = document.querySelector('ha-tty7-card')!;
+      const states = card.hass!.states;
+      for (const entity of Object.values(states)) {
+        if (!entity || !Object.hasOwn(entity.attributes, 'last_contact')) continue;
+        entity.attributes.last_contact = '2026-10-14T23:07:00Z';
+        entity.attributes.last_success = '2026-10-14T22:06:00Z';
+      }
+      card.hass = {
+        ...card.hass!, states, config: { time_zone: 'Asia/Tokyo' },
+        locale: { language: 'en-US', number_format: 'language', time_format: '12', date_format: 'DMY', first_weekday: 'language', time_zone: 'server' },
+      } as typeof card.hass;
+      await card.updateComplete;
+    });
+    const times = page.locator('ha-tty7-card section').first().locator('time');
+    await expect(times.nth(0)).toHaveText('15/10/2026, 8:07 AM');
+    await expect(times.nth(1)).toHaveText('15/10/2026, 7:06 AM');
+    await expect(times.nth(0)).toHaveAttribute('datetime', '2026-10-14T23:07:00Z');
+    await page.evaluate(async () => {
+      const card = document.querySelector('ha-tty7-card')!;
+      const hass = card.hass! as typeof card.hass & { locale: { time_format: string; date_format: string; time_zone: string } };
+      hass.locale.time_format = '24';
+      hass.locale.date_format = 'YMD';
+      hass.locale.time_zone = 'local';
+      card.hass = hass;
+      await card.updateComplete;
+    });
+    await expect(times.nth(0)).toHaveText('2026/10/14, 16:07');
+    await expect(times.nth(1)).toHaveText('2026/10/14, 15:06');
+    await page.evaluate(async () => {
+      const card = document.querySelector('ha-tty7-card')!;
+      const hass = card.hass! as typeof card.hass & { locale: { language: string; time_format: string; date_format: string } };
+      hass.locale.language = 'de-DE';
+      hass.locale.time_format = 'language';
+      hass.locale.date_format = 'language';
+      card.hass = hass;
+      await card.updateComplete;
+    });
+    await expect(times.nth(0)).toHaveText('14.10.2026, 16:07');
+    await expect(times.nth(1)).toHaveText('14.10.2026, 15:06');
+  });
+});

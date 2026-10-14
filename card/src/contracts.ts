@@ -11,6 +11,8 @@ export interface HostConfig {
 export interface CardConfig {
   type: 'custom:ha-tty7-card';
   hosts: HostConfig[];
+  title?: string;
+  appearance?: 'tty7' | 'home-assistant';
 }
 export interface HassEntity {
   state: string;
@@ -32,18 +34,30 @@ export interface DeviceRegistryEntry {
   name_by_user: string | null;
   disabled_by: string | null;
 }
+// Profile preferences from supported HA frontend 20260930.2 FrontendLocaleData.
+export interface HassLocale {
+  language: string;
+  number_format: string;
+  time_format: 'language' | 'system' | '12' | '24';
+  date_format: 'language' | 'system' | 'DMY' | 'MDY' | 'YMD';
+  first_weekday: string;
+  time_zone: 'local' | 'server';
+}
 export interface HomeAssistant {
   states: HassStates;
   connection?: { connected: boolean };
   themes?: { darkMode?: boolean };
   entities?: Record<string, EntityRegistryEntry>;
   devices?: Record<string, DeviceRegistryEntry>;
+  locale?: HassLocale;
+  config?: { time_zone: string };
 }
 export interface AgentRecord {
   pane_id: number;
   session_id: string | null;
   agent: string;
   status: AgentStatus;
+  inferred?: boolean;
   activity: number | null;
   turns: number | null;
   model: string | null;

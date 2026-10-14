@@ -26,6 +26,15 @@ describe('Lovelace card consumer behavior', () => {
     await card.updateComplete;
     expect(card.shadowRoot!.textContent).not.toContain('PRIVATE_SECRET');
   });
+  it('renders configured title as inert text and preserves the existing default for saved configs', async () => {
+    const card = await mount();
+    expect(card.shadowRoot!.querySelector('h1')!.textContent).toBe('tty7 agents');
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts: hostConfigs, title: HOSTILE });
+    await card.updateComplete;
+    expect(card.shadowRoot!.querySelector('h1')!.textContent).toBe(HOSTILE);
+    expect(card.shadowRoot!.querySelector('img,script,iframe')).toBeNull();
+    expect(card.shadowRoot!.querySelector('header')!.textContent).not.toContain('Read-only status');
+  });
   it('expands structured details without inventing activity units', async () => {
     const card = await mount();
     const row = card.shadowRoot!.querySelector<HTMLButtonElement>('[data-pane="2"]')!;
@@ -33,6 +42,26 @@ describe('Lovelace card consumer behavior', () => {
     await card.updateComplete;
     expect(row.getAttribute('aria-expanded')).toBe('true');
     expect(card.shadowRoot!.querySelector('dl:not([hidden])')!.textContent).not.toMatch(/tokens|seconds/);
+  });
+  it.each([{ pane: 4, status: 'Idle' }, { pane: 3, status: 'Done' }])('distinguishes inferred $status in visible, accessible and expanded status', async ({ pane, status }) => {
+    const card = await mount();
+    const row = card.shadowRoot!.querySelector<HTMLButtonElement>(`[data-pane="${pane}"]`)!;
+    expect(row.querySelector('.status')!.textContent).toBe(status);
+    const agents = card.hass!.states[hostConfigs[0]!.roster_entity]!.attributes.agents as Record<string, unknown>[];
+    agents.find(agent => agent.pane_id === pane)!.inferred = true;
+    card.hass = card.hass;
+    await card.updateComplete;
+    expect(row.querySelector('.status')!.textContent).toBe(`${status} (inferred)`);
+    expect(row.getAttribute('aria-label')).toContain(`${status} (inferred)`);
+    row.click();
+    await card.updateComplete;
+    const detail = card.shadowRoot!.querySelector('dl:not([hidden])')!;
+    expect([...detail.querySelectorAll('dt')].find(term => term.textContent === 'Status')!.nextElementSibling!.textContent).toBe(`${status} (inferred)`);
+    agents.find(agent => agent.pane_id === pane)!.inferred = false;
+    card.hass = card.hass;
+    await card.updateComplete;
+    expect(row.querySelector('.status')!.textContent).toBe(status);
+    expect(row.getAttribute('aria-expanded')).toBe('true');
   });
   it('preserves details and button nodes across heartbeat reorder but closes replacement identities', async () => {
     const card = await mount();
@@ -95,7 +124,7 @@ describe('Lovelace card consumer behavior', () => {
     expect(card.shadowRoot!.querySelectorAll('.agent-row')).toHaveLength(6);
     expect(row.isConnected).toBe(true);
     expect(row.getAttribute('aria-expanded')).toBe('true');
-    expect(card.shadowRoot!.querySelector('time')!.textContent).toBe(receipt);
+    expect(card.shadowRoot!.querySelector('time')!.getAttribute('datetime')).toBe(receipt);
     expect(card.shadowRoot!.textContent).not.toContain('s ago');
   });
   it('changes healthy to stale only when HA publishes expiry, preserving open last-known details', async () => {

@@ -58,7 +58,15 @@ The user service follows your user-manager lifetime. Enable user lingering only 
 
 ## Updates and removal
 
-HACS handles HA integration updates; restart when requested. The bundled card URL is versioned, so normal updates load the new module without manual resource edits. Preserve host entries and private collector files. Reinstall the collector package when updating it; protocol v1 remains compatible.
+HACS handles HA integration updates; restart when requested. The bundled card URL is versioned, so normal updates load the new module without manual resource edits. Preserve host entries and private collector files.
+
+For **0.3.0**, update/restart the HA integration **before** reinstalling the collector. New collectors preserve tty7's optional `inferred: true` provenance; older HA-tty7 validators reject that additional field. The 0.3.0 integration still accepts previous collector records. After updating HA, reinstall the collector in its existing virtual environment and restart only `ha-tty7.service`; preserve its private configuration and pairing URL.
+
+In the card's visual editor, set **Card title** and choose **Home Assistant** appearance to follow native HA theme styling. Date/time display follows HA profile preferences and the selected local/server timezone.
+
+If Codex is absent, use its `/hooks` screen to review/trust the tty7 handlers and start a fresh Codex session inside tty7. Hook installation does not activate an already-running or untrusted hook definition. Do not synthesize status events to make it appear.
+
+On tty7 26.10.0, OMP model/effort reporting requires the separate supported upstream producer/emitter fix; updating this HA integration alone cannot populate fields tty7 never reports. Genuine session/turn timers are not available through the current tty7 roster.
 
 Remove a host in HA to revoke its credential and remove its monitoring entities. Stop/remove only its collector service:
 

@@ -25,7 +25,9 @@ export function validateConfig(value: unknown): CardConfig {
   const fail = () => { throw new Error('Configure unique host names, sensor rosters, and binary_sensor connectivity entities.'); };
   if (!object(value) || value.type !== 'custom:ha-tty7-card' || !Array.isArray(value.hosts)
     || value.hosts.length > 64
-    || Object.keys(value).some(key => !['type', 'hosts'].includes(key))) return fail();
+    || Object.keys(value).some(key => !['type', 'hosts', 'title', 'appearance'].includes(key))) return fail();
+  if (Object.hasOwn(value, 'title') && (!boundedString(value.title, 128) || !value.title.trim())) return fail();
+  if (Object.hasOwn(value, 'appearance') && !['tty7', 'home-assistant'].includes(value.appearance as string)) return fail();
   const names = new Set<string>();
   const entities = new Set<string>();
   const hosts: HostConfig[] = [];
@@ -39,11 +41,16 @@ export function validateConfig(value: unknown): CardConfig {
     entities.add(host.connectivity_entity);
     hosts.push({ name: host.name.trim(), roster_entity: host.roster_entity, connectivity_entity: host.connectivity_entity });
   }
-  return { type: 'custom:ha-tty7-card', hosts };
+  return {
+    type: 'custom:ha-tty7-card', hosts,
+    ...(Object.hasOwn(value, 'title') ? { title: (value.title as string).trim() } : {}),
+    ...(Object.hasOwn(value, 'appearance') ? { appearance: value.appearance as CardConfig['appearance'] & string } : {}),
+  };
 }
 
 function parseAgent(value: unknown): AgentRecord | null {
   if (!object(value) || !safeNumber(value.pane_id) || value.pane_id === 0 || !boundedString(value.agent, 64)) return null;
+  if (Object.hasOwn(value, 'inferred') && typeof value.inferred !== 'boolean') return null;
   for (const key of ['session_id', 'model', 'effort', 'permission_mode']) {
     if (value[key] !== undefined && value[key] !== null && !boundedString(value[key], 128)) return null;
   }
@@ -56,6 +63,7 @@ function parseAgent(value: unknown): AgentRecord | null {
     agent: value.agent,
     session_id: (value.session_id as string | null | undefined) ?? null,
     status: STATUSES.includes(value.status as AgentStatus) ? value.status as AgentStatus : 'unknown',
+    ...(value.inferred === true ? { inferred: true } : {}),
     activity: (value.activity as number | null | undefined) ?? null,
     turns: (value.turns as number | null | undefined) ?? null,
     model: (value.model as string | null | undefined) ?? null,

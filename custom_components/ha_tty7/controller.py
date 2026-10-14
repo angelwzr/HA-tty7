@@ -107,7 +107,9 @@ class HostController:
         """Consume a shared-protocol-validated, host-bound report."""
         self.expire(now)
         was_ready = self.online
-        previous = {(agent["session_id"], agent["pane_id"]): agent["status"] for agent in self.agents}
+        previous = {(agent["session_id"], agent["pane_id"]):
+                    "unknown" if agent.get("inferred", False) else agent["status"]
+                    for agent in self.agents}
         events: list[dict[str, Any]] = []
         self.last_contact = now
         if report["kind"] == "error":
@@ -123,6 +125,8 @@ class HostController:
         if not was_ready:
             return events
         for agent in self.agents:
+            if agent.get("inferred", False):
+                continue
             prior = previous.get((agent["session_id"], agent["pane_id"]))
             kind = None
             if agent["status"] == "waiting" and prior in (None, "idle", "working", "done"):

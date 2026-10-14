@@ -3,6 +3,7 @@ import { repeat } from 'lit/directives/repeat.js';
 import type { AgentView, CardConfig, ErrorCode, HomeAssistant, HostState, HostView } from './contracts';
 import { deriveHostView, validateConfig } from './state';
 import { cardStyles } from './styles';
+import { formatTimestamp } from './datetime';
 import './editor';
 import type { HaTty7CardEditor } from './editor';
 import { discoverHosts } from './discovery';
@@ -56,6 +57,7 @@ export class HaTty7Card extends LitElement {
     try {
       this.config = validateConfig(value);
       this.configurationError = false;
+      this.setAttribute('appearance', this.config.appearance ?? 'tty7');
       this.selectedHost = '';
       this.expanded.clear();
     } catch (error) {
@@ -88,21 +90,22 @@ export class HaTty7Card extends LitElement {
 
   private renderAgent(agent: AgentView, lastKnown: boolean) {
     const open = this.expanded.has(agent.identity);
+    const statusLabel = `${STATUS_LABELS[agent.status]}${agent.inferred === true ? ' (inferred)' : ''}`;
     // Encode identity into a safe DOM ID, without allowing incoming strings to become selectors/markup.
     const detailId = `details-${Array.from(agent.identity, character => character.codePointAt(0)!.toString(16)).join('-')}`;
     return html`<li class=${lastKnown ? 'last-known' : ''}>
       <button class="agent-row" data-pane=${agent.pane_id} aria-expanded=${String(open)} aria-controls=${detailId}
-        aria-label=${`${agent.agent}, pane ${agent.pane_id}, ${STATUS_LABELS[agent.status]}${lastKnown ? ', last known' : ''}. ${open ? 'Hide' : 'Show'} details`}
+        aria-label=${`${agent.agent}, pane ${agent.pane_id}, ${statusLabel}${lastKnown ? ', last known' : ''}. ${open ? 'Hide' : 'Show'} details`}
         @click=${() => this.toggleDetails(agent.identity)}>
         <span class="agent-icon" aria-hidden="true">${svg`<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="12" height="11" rx="3"/><path d="M10 2v3M1 9h3m12 0h3M7 16v2m6-2v2"/><circle cx="7.5" cy="10" r=".75" fill="currentColor"/><circle cx="12.5" cy="10" r=".75" fill="currentColor"/><path d="M7 13h6"/></svg>`}</span>
         <span class="agent-copy"><span class="agent-name">${agent.agent}</span>
           <span class="identity">Pane ${agent.pane_id} · ${agent.session_id ?? 'Session unavailable'}</span></span>
-        <span class="status" data-status=${agent.status}><span class="dot" aria-hidden="true"></span>${STATUS_LABELS[agent.status]}</span>
+        <span class="status" data-status=${agent.status}><span class="dot" aria-hidden="true"></span>${statusLabel}</span>
         <span class="chevron" aria-hidden="true">${open ? '⌄' : '›'}</span>
       </button>
       <dl id=${detailId} ?hidden=${!open}>
         ${open ? [
-          ['Agent', agent.agent], ['Status', STATUS_LABELS[agent.status]], ['Pane', agent.pane_id],
+          ['Agent', agent.agent], ['Status', statusLabel], ['Pane', agent.pane_id],
           ['Session', agent.session_id], ['Activity (as reported)', agent.activity], ['Turns (as reported)', agent.turns],
           ['Model', agent.model], ['Effort', agent.effort], ['Permission mode (informational)', agent.permission_mode],
         ].map(([label, value]) => html`<dt>${label}</dt><dd>${value ?? 'Unavailable'}</dd>`) : nothing}
@@ -114,9 +117,9 @@ export class HaTty7Card extends LitElement {
     return html`<section aria-label=${host.config.name}>
       <div class="host-head"><div class="host-title"><h2>${host.config.name}</h2>
         <span class="host-state" data-state=${host.state} role="status">${HOST_LABELS[host.state]}</span></div>
-        <p class="receipt">${host.lastContact === null ? 'No confirmed receipt' : html`Last contact (HA): <time datetime=${host.lastContact}>${host.lastContact}</time>`}
+        <p class="receipt">${host.lastContact === null ? 'No confirmed receipt' : html`Last contact (HA): <time datetime=${host.lastContact}>${formatTimestamp(host.lastContact, this.currentHass)}</time>`}
           ${host.agents.length ? html` · ${host.agents.length} reported` : nothing}</p>
-        ${host.lastKnown && host.lastSuccess !== null ? html`<p class="receipt">Last successful snapshot (HA): <time datetime=${host.lastSuccess}>${host.lastSuccess}</time></p>` : nothing}
+        ${host.lastKnown && host.lastSuccess !== null ? html`<p class="receipt">Last successful snapshot (HA): <time datetime=${host.lastSuccess}>${formatTimestamp(host.lastSuccess, this.currentHass)}</time></p>` : nothing}
       </div>
       ${NOTICES[host.state] ? html`<p class="notice">${NOTICES[host.state]}${host.errorCode ? html` ${ERROR_LABELS[host.errorCode]}.` : nothing}</p>` : nothing}
       ${host.agents.length ? html`<ul>${repeat(host.agents, agent => agent.identity, agent => this.renderAgent(agent, host.lastKnown))}</ul>` : nothing}
@@ -132,13 +135,15 @@ export class HaTty7Card extends LitElement {
       this.currentHass?.connection?.connected ?? true));
     const identities = new Set(hosts.flatMap(host => host.agents.map(agent => agent.identity)));
     for (const identity of this.expanded) if (!identities.has(identity)) this.expanded.delete(identity);
-    return html`<ha-card>
-      <header><div><h1><span class="brand">tty7</span> agents</h1><span class="subtitle">Read-only status</span></div>
+    const native = this.config.appearance === 'home-assistant';
+    return html`<ha-card .header=${native ? this.config.title ?? 'tty7 agents' : undefined}>
+      ${!native || hosts.length > 1 ? html`<header>
+        ${native ? nothing : html`<h1>${this.config.title ?? html`<span class="brand">tty7</span> agents`}</h1>`}
         ${hosts.length > 1 ? html`<label>Show host<select aria-label="Show host" .value=${this.selectedHost}
           @change=${(event: Event) => { this.selectedHost = (event.target as HTMLSelectElement).value; this.requestUpdate(); }}>
           <option value="">All hosts</option>${this.config.hosts.map(host => html`<option value=${host.roster_entity}>${host.name}</option>`)}
         </select></label>` : nothing}
-      </header>
+      </header>` : nothing}
       ${repeat(hosts.filter(host => !this.selectedHost || host.config.roster_entity === this.selectedHost),
         host => host.config.roster_entity, host => this.renderHost(host))}
     </ha-card>`;

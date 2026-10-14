@@ -32,6 +32,18 @@ def test_baselines_identity_and_transitions():
     assert controller.online
 
 
+def test_inferred_completion_does_not_notify_and_retains_provenance():
+    controller = HostController("desktop_demo")
+    snapshot(controller, [agent()], 0)
+    guessed = agent("done") | {"inferred": True}
+    assert snapshot(controller, [guessed], 1) == []
+    assert controller.attributes["agents"] == [guessed]
+    assert snapshot(controller, [agent()], 2) == []
+    assert [event["kind"] for event in snapshot(controller, [agent("done")], 3)] == ["completed"]
+    assert snapshot(controller, [agent() | {"inferred": True}], 4) == []
+    assert snapshot(controller, [agent("done")], 5) == []
+
+
 def test_error_silence_and_reconnection_preserve_rows():
     controller = HostController("desktop_demo")
     snapshot(controller, [agent()], 0)

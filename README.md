@@ -25,6 +25,20 @@ The integration bundles and loads the card. No per-host YAML, secrets.yaml editi
 
 Missing metadata stays unavailable. Expandable details and host filtering affect only the local dashboard. They never send input to tty7.
 
+The visual editor includes **Card title** and **Appearance** (`tty7` or `Home Assistant`). Home Assistant appearance leaves the native card surface, borders, shadows and radius to HA and uses its theme colors. Receipt timestamps follow HA profile language, date/time format and timezone preferences.
+
+tty7-reported `inferred` states are explicitly labeled; they are guesses after hook silence or interruption, not confirmed completion. They never trigger completion notifications.
+
+### Reporting coverage
+
+`tty7 --json agents` lists sessions that have reported lifecycle events, not every agent icon detected in tty7's sidebar. The sidebar aggregates a tab's panes; this card shows individual reported panes. For missing Codex sessions, review and trust the tty7 handlers in Codex's `/hooks` screen, then start a fresh session inside tty7. Installed hook files alone do not prove that a running Codex process loaded or trusted them.
+
+tty7 26.10.0's OMP producer sends only session identity and its emitter discards OMP model/effort fields. HA cannot recover those missing values. The [supported upstream producer/emitter patch](upstream/tty7-26.10.0-omp-reporting.patch) applies to official tty7 v26.10.0 (`0a55c33b72571f6e9886546b376bd5db2c38be72`). It sends actual selected model/effort, preserves working state during automatic continuation, and reports genuine tool progress. It does not install a private-wire bridge or read conversations. Model values remain unavailable until patched tty7 is installed, its OMP integration refreshed, and OMP sessions reloaded.
+
+Patch validation: pristine-base apply check, three actual-source emitter tests, and execution of the generated OMP bridge for metadata changes, tool progress, continuation and final stop. The full upstream workspace build remains unverified because its unrelated Zed dependency fetch did not complete. Build/install the patched terminal using tty7's upstream instructions; this repository does not ship a replacement terminal binary.
+
+Session/turn timers are not derived from HA receipt time. OMP exposes session-header creation time and turn-start lifecycle timestamps, but tty7's current agent roster does not transmit them.
+
 ## Pairing and security
 
 Each host has an independent cryptographically random webhook credential bound to its configured ID. Pairing information appears only in authenticated integration setup/options, never in entity attributes or card configuration. Removing a host revokes its credential.
@@ -72,3 +86,5 @@ Native HA fixtures require the HA-matched test plugin; see `integration-tests/RE
 ## License
 
 Project code is MIT licensed. The bundled Lit runtime retains its BSD-3-Clause notices; see the integration's third-party notices. Original agent glyph/brand artwork is local, not copied from third-party agent logos.
+
+The separate tty7 upstream patch retains tty7's Apache-2.0 licensing; see [upstream license](upstream/TTY7_LICENSE.txt). It is not an official tty7 release.
