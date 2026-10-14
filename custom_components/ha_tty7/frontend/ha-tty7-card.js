@@ -264,12 +264,12 @@ x.elementStyles = [], x.shadowRootOptions = { mode: "open" }, x[U("elementProper
  */
 const Q = globalThis, nt = (n) => n, z = Q.trustedTypes, rt = z ? z.createPolicy("lit-html", { createHTML: (n) => n }) : void 0, bt = "$lit$", $ = `lit$${Math.random().toFixed(9).slice(2)}$`, vt = "?" + $, zt = `<${vt}>`, A = document, P = () => A.createComment(""), O = (n) => n === null || typeof n != "object" && typeof n != "function", G = Array.isArray, Lt = (n) => G(n) || typeof n?.[Symbol.iterator] == "function", I = `[ 	
 \f\r]`, k = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g, ot = /-->/g, at = />/g, _ = RegExp(`>|${I}(?:([^\\s"'>=/]+)(${I}*=${I}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g"), lt = /'/g, dt = /"/g, At = /^(?:script|style|textarea|title)$/i, wt = (n) => (t, ...e) => ({ _$litType$: n, strings: t, values: e }), m = wt(1), jt = wt(2), w = Symbol.for("lit-noChange"), u = Symbol.for("lit-nothing"), ct = /* @__PURE__ */ new WeakMap(), v = A.createTreeWalker(A, 129);
+\f\r"'\`<>=]|("|')|))|$)`, "g"), lt = /'/g, dt = /"/g, At = /^(?:script|style|textarea|title)$/i, wt = (n) => (t, ...e) => ({ _$litType$: n, strings: t, values: e }), m = wt(1), Dt = wt(2), w = Symbol.for("lit-noChange"), u = Symbol.for("lit-nothing"), ct = /* @__PURE__ */ new WeakMap(), v = A.createTreeWalker(A, 129);
 function xt(n, t) {
   if (!G(n) || !n.hasOwnProperty("raw")) throw Error("invalid template strings array");
   return rt !== void 0 ? rt.createHTML(t) : t;
 }
-const Dt = (n, t) => {
+const jt = (n, t) => {
   const e = n.length - 1, i = [];
   let s, r = t === 2 ? "<svg>" : t === 3 ? "<math>" : "", o = k;
   for (let a = 0; a < e; a++) {
@@ -286,7 +286,7 @@ class M {
     let s;
     this.parts = [];
     let r = 0, o = 0;
-    const a = t.length - 1, l = this.parts, [h, f] = Dt(t, e);
+    const a = t.length - 1, l = this.parts, [h, f] = jt(t, e);
     if (this.el = M.createElement(h, i), v.currentNode = this.el.content, e === 2 || e === 3) {
       const d = this.el.content.firstChild;
       d.replaceWith(...d.childNodes);
@@ -295,7 +295,7 @@ class M {
       if (s.nodeType === 1) {
         if (s.hasAttributes()) for (const d of s.getAttributeNames()) if (d.endsWith(bt)) {
           const p = f[o++], c = s.getAttribute(d).split($), y = /([.?@])?(.*)/.exec(p);
-          l.push({ type: 1, index: r, name: y[2], strings: c, ctor: y[1] === "." ? Bt : y[1] === "?" ? qt : y[1] === "@" ? Wt : j }), s.removeAttribute(d);
+          l.push({ type: 1, index: r, name: y[2], strings: c, ctor: y[1] === "." ? qt : y[1] === "?" ? Bt : y[1] === "@" ? Wt : D }), s.removeAttribute(d);
         } else d.startsWith($) && (l.push({ type: 6, index: r }), s.removeAttribute(d));
         if (At.test(s.tagName)) {
           const d = s.textContent.split($), p = d.length - 1;
@@ -411,7 +411,7 @@ class C {
     this._$AM === void 0 && (this._$Cv = t, this._$AP?.(t));
   }
 }
-class j {
+class D {
   get tagName() {
     return this.element.tagName;
   }
@@ -436,7 +436,7 @@ class j {
     t === u ? this.element.removeAttribute(this.name) : this.element.setAttribute(this.name, t ?? "");
   }
 }
-class Bt extends j {
+class qt extends D {
   constructor() {
     super(...arguments), this.type = 3;
   }
@@ -444,7 +444,7 @@ class Bt extends j {
     this.element[this.name] = t === u ? void 0 : t;
   }
 }
-class qt extends j {
+class Bt extends D {
   constructor() {
     super(...arguments), this.type = 4;
   }
@@ -452,7 +452,7 @@ class qt extends j {
     this.element.toggleAttribute(this.name, !!t && t !== u);
   }
 }
-class Wt extends j {
+class Wt extends D {
   constructor(t, e, i, s, r) {
     super(t, e, i, s, r), this.type = 5;
   }
@@ -566,7 +566,7 @@ const { I: Yt } = Kt, ht = (n) => n, pt = () => document.createComment(""), H = 
     }
   }
   return e;
-}, b = (n, t, e = n) => (n._$AI(t, e), n), te = {}, ee = (n, t = te) => n._$AH = t, se = (n) => n._$AH, B = (n) => {
+}, b = (n, t, e = n) => (n._$AI(t, e), n), te = {}, ee = (n, t = te) => n._$AH = t, se = (n) => n._$AH, q = (n) => {
   n._$AR(), n._$AA.remove();
 };
 /**
@@ -605,21 +605,21 @@ const ut = (n, t, e) => {
     else if (a[d] === o[y]) l[y] = b(s[d], r[y]), H(n, l[y + 1], s[d]), d++, y--;
     else if (a[p] === o[c]) l[c] = b(s[p], r[c]), H(n, s[d], s[p]), p--, c++;
     else if (h === void 0 && (h = ut(o, c, y), f = ut(a, d, p)), h.has(a[d])) if (h.has(a[p])) {
-      const g = f.get(o[c]), D = g !== void 0 ? s[g] : null;
-      if (D === null) {
+      const g = f.get(o[c]), j = g !== void 0 ? s[g] : null;
+      if (j === null) {
         const Y = H(n, s[d]);
         b(Y, r[c]), l[c] = Y;
-      } else l[c] = b(D, r[c]), H(n, s[d], D), s[g] = null;
+      } else l[c] = b(j, r[c]), H(n, s[d], j), s[g] = null;
       c++;
-    } else B(s[p]), p--;
-    else B(s[d]), d++;
+    } else q(s[p]), p--;
+    else q(s[d]), d++;
     for (; c <= y; ) {
       const g = H(n, l[y + 1]);
       b(g, r[c]), l[c++] = g;
     }
     for (; d <= p; ) {
       const g = s[d++];
-      g !== null && B(g);
+      g !== null && q(g);
     }
     return this.ut = o, ee(n, l), w;
   }
@@ -899,8 +899,9 @@ class le extends S {
     `;
   }
 }
+document.querySelector("home-assistant") && await customElements.whenDefined("home-assistant");
 customElements.get("ha-tty7-card-editor") || customElements.define("ha-tty7-card-editor", le);
-const q = { working: "Working", waiting: "Waiting", done: "Done", idle: "Idle", unknown: "Unknown" }, de = {
+const B = { working: "Working", waiting: "Waiting", done: "Done", idle: "Idle", unknown: "Unknown" }, de = {
   loading: "Loading",
   healthy: "Online",
   empty: "Online · empty",
@@ -963,18 +964,18 @@ class he extends S {
     const i = this.expanded.has(t.identity), s = `details-${Array.from(t.identity, (r) => r.codePointAt(0).toString(16)).join("-")}`;
     return m`<li class=${e ? "last-known" : ""}>
       <button class="agent-row" data-pane=${t.pane_id} aria-expanded=${String(i)} aria-controls=${s}
-        aria-label=${`${t.agent}, pane ${t.pane_id}, ${q[t.status]}${e ? ", last known" : ""}. ${i ? "Hide" : "Show"} details`}
+        aria-label=${`${t.agent}, pane ${t.pane_id}, ${B[t.status]}${e ? ", last known" : ""}. ${i ? "Hide" : "Show"} details`}
         @click=${() => this.toggleDetails(t.identity)}>
-        <span class="agent-icon" aria-hidden="true">${jt`<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="12" height="11" rx="3"/><path d="M10 2v3M1 9h3m12 0h3M7 16v2m6-2v2"/><circle cx="7.5" cy="10" r=".75" fill="currentColor"/><circle cx="12.5" cy="10" r=".75" fill="currentColor"/><path d="M7 13h6"/></svg>`}</span>
+        <span class="agent-icon" aria-hidden="true">${Dt`<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="12" height="11" rx="3"/><path d="M10 2v3M1 9h3m12 0h3M7 16v2m6-2v2"/><circle cx="7.5" cy="10" r=".75" fill="currentColor"/><circle cx="12.5" cy="10" r=".75" fill="currentColor"/><path d="M7 13h6"/></svg>`}</span>
         <span class="agent-copy"><span class="agent-name">${t.agent}</span>
           <span class="identity">Pane ${t.pane_id} · ${t.session_id ?? "Session unavailable"}</span></span>
-        <span class="status" data-status=${t.status}><span class="dot" aria-hidden="true"></span>${q[t.status]}</span>
+        <span class="status" data-status=${t.status}><span class="dot" aria-hidden="true"></span>${B[t.status]}</span>
         <span class="chevron" aria-hidden="true">${i ? "⌄" : "›"}</span>
       </button>
       <dl id=${s} ?hidden=${!i}>
         ${i ? [
       ["Agent", t.agent],
-      ["Status", q[t.status]],
+      ["Status", B[t.status]],
       ["Pane", t.pane_id],
       ["Session", t.session_id],
       ["Activity (as reported)", t.activity],
@@ -1028,7 +1029,7 @@ class he extends S {
 }
 customElements.get("ha-tty7-card") || customElements.define("ha-tty7-card", he);
 window.customCards ??= [];
-window.customCards.some((n) => n.type === "ha-tty7-card") || window.customCards.push({ type: "ha-tty7-card", name: "tty7 agents", description: "Read-only structured tty7 status grouped by host.", preview: !0 });
+window.customCards.some((n) => n.type === "ha-tty7-card") || window.customCards.push({ type: "ha-tty7-card", name: "HA-tty7", description: "Read-only structured tty7 agent status grouped by host.", preview: !0 });
 export {
   he as HaTty7Card
 };

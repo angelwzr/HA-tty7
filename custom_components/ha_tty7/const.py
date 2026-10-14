@@ -2,7 +2,7 @@
 from homeassistant.const import Platform
 
 DOMAIN = "ha_tty7"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 PLATFORMS = (Platform.SENSOR, Platform.BINARY_SENSOR)
 CONF_HOST_ID = "host_id"
 CONF_LABEL = "label"

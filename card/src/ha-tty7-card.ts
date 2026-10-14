@@ -155,5 +155,5 @@ declare global {
 }
 window.customCards ??= [];
 if (!window.customCards.some(card => card.type === 'ha-tty7-card')) {
-  window.customCards.push({ type: 'ha-tty7-card', name: 'tty7 agents', description: 'Read-only structured tty7 status grouped by host.', preview: true });
+  window.customCards.push({ type: 'ha-tty7-card', name: 'HA-tty7', description: 'Read-only structured tty7 agent status grouped by host.', preview: true });
 }

@@ -138,5 +138,10 @@ export class HaTty7CardEditor extends LitElement {
   }
 }
 
+// HA imports extra modules concurrently with app.ts. App installs its scoped registry shim;
+// defining against the earlier native registry would leave HA's card lookup unable to find us.
+// The parsed HA root exists before extra modules run; local consumer fixtures have no HA root.
+if (document.querySelector('home-assistant')) await customElements.whenDefined('home-assistant');
+
 if (!customElements.get('ha-tty7-card-editor')) customElements.define('ha-tty7-card-editor', HaTty7CardEditor);
 declare global { interface HTMLElementTagNameMap { 'ha-tty7-card-editor': HaTty7CardEditor } }
