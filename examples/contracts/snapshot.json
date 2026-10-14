@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "host_id": "desktop_demo",
+  "kind": "snapshot",
+  "agents": [
+    {
+      "pane_id": 7,
+      "session_id": "demo-session",
+      "agent": "OhMyPi",
+      "status": "working",
+      "activity": 0,
+      "turns": 2,
+      "model": "demo-model",
+      "effort": null,
+      "permission_mode": null
+    }
+  ]
+}

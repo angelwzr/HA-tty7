@@ -1,0 +1,63 @@
+{
+  "title": "HA-tty7",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a tty7 host",
+        "description": "Create a read-only, local-only POST webhook. Use the verified HTTPS Home Assistant base URL reachable by your collector. No Home Assistant API token is needed. Notifications are optional and can target only an existing Companion mobile-app action or persistent notifications.",
+        "data": {
+          "host_id": "Wire host ID",
+          "label": "Host display label",
+          "base_url": "Verified HTTPS Home Assistant base URL",
+          "notify_destination": "Notification destination",
+          "notify_waiting": "Notify when an agent needs input",
+          "notify_completion": "Notify when a working agent completes",
+          "dashboard_path": "Local dashboard path"
+        }
+      },
+      "pairing": {
+        "title": "Pair your collector privately",
+        "description": "Wire host ID: `{host_id}`\n\nSecret webhook URL:\n\n`{webhook_url}`\n\nSave this bearer credential only in the collector's private settings file. Do not put it in a dashboard, screenshot, log or repository. Keep certificate and hostname verification enabled. Requests are POST-only and restricted to local networks by Home Assistant. Finish setup before starting the collector. You can view this information again in Configure."
+      }
+    },
+    "error": {
+      "invalid_host_id": "Use 1–64 lowercase letters, digits, hyphens or underscores, starting with a letter or digit.",
+      "invalid_label": "Enter a 1–64 character label without line breaks or control characters.",
+      "invalid_base_url": "Enter an HTTPS base URL without credentials, query parameters or fragments. The collector must trust its certificate and hostname.",
+      "invalid_destination": "Choose no notifications, persistent notifications, or an existing Companion mobile-app action.",
+      "invalid_dashboard": "Enter a local path such as /lovelace/agents using letters, digits, underscores, hyphens and slashes.",
+      "invalid_toggle": "Choose on or off."
+    },
+    "abort": {
+      "already_configured": "This wire host ID is already configured.",
+      "credential_redaction_capacity": "The process-lifetime credential privacy limit has been reached. Restart Home Assistant before adding another host."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure host and notifications",
+        "description": "Changing settings reloads this host and reconfirms its notification baseline. Its wire host ID and private credential stay fixed; remove the host to revoke the credential.",
+        "data": {
+          "label": "Host display label",
+          "base_url": "Verified HTTPS Home Assistant base URL",
+          "notify_destination": "Notification destination",
+          "notify_waiting": "Notify when an agent needs input",
+          "notify_completion": "Notify when a working agent completes",
+          "dashboard_path": "Local dashboard path"
+        }
+      },
+      "pairing": {
+        "title": "Collector pairing",
+        "description": "Wire host ID: `{host_id}`\n\nSecret webhook URL:\n\n`{webhook_url}`\n\nKeep this bearer credential in the collector's private settings only. Keep TLS certificate and hostname verification enabled. Finish to save these options. Removing the integration host revokes this credential."
+      }
+    },
+    "error": {
+      "invalid_label": "Enter a 1–64 character label without line breaks or control characters.",
+      "invalid_base_url": "Enter a valid HTTPS base URL without credentials, query parameters or fragments.",
+      "invalid_destination": "Choose no notifications, persistent notifications, or an existing Companion mobile-app action.",
+      "invalid_dashboard": "Enter a local dashboard path such as /lovelace/agents.",
+      "invalid_toggle": "Choose on or off."
+    }
+  }
+}

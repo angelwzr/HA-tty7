@@ -1,0 +1,45 @@
+# Local credentials, webhook URLs, and deployment overrides
+.env
+.env.*
+!.env.example
+.secrets/
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+*.local.yaml
+*.local.yml
+*.local.toml
+*.local.json
+*.secret
+secrets.yaml
+acceptance.toml
+
+# Runtime captures and local state: never commit raw tty7/session data
+runtime/
+captures/
+*.log
+*.db
+*.db-shm
+*.db-wal
+
+# Dependencies, builds, and test caches
+node_modules/
+dist/
+build/
+*.egg-info/
+*.tsbuildinfo
+coverage/
+test-results/
+playwright-report/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS-generated files
+.DS_Store
+Thumbs.db

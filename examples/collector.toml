@@ -1,0 +1,13 @@
+# Copy to ~/.config/ha-tty7/collector.toml and chmod 600.
+# The URL file contains only your HTTPS webhook URL and must also be chmod 600.
+# It is resolved relative to this configuration file; never commit that file.
+host_id = "desktop_demo"
+# Set this to your stable, installed tty7 CLI, not an AppImage /tmp mount.
+tty7_path = "/usr/local/bin/tty7"
+webhook_url_file = "webhook-url"
+# Set when the service should use a nondefault tty7 server directory.
+# tty7_config_dir = "/home/your-user/.config/tty7"
+# Set for a private CA not trusted by the system; never disable verification.
+# ca_file = "/etc/ssl/certs/homelab-ca.pem"
+poll_seconds = 2
+heartbeat_seconds = 15

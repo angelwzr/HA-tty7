@@ -1,0 +1,8 @@
+{
+  "name": "HA-tty7",
+  "homeassistant": "2026.10.0",
+  "hacs": "2.0.5",
+  "zip_release": true,
+  "filename": "ha_tty7.zip",
+  "hide_default_branch": true
+}

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ha-tty7"
+version = "0.2.0"
+description = "Read-only tty7 agent-status integration for Home Assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+ha-tty7 = "ha_tty7.main:main"
+
+[tool.setuptools]
+packages = ["ha_tty7", "ha_tty7.protocol"]
+
+[tool.setuptools.package-dir]
+ha_tty7 = "collector/ha_tty7"
+"ha_tty7.protocol" = "custom_components/ha_tty7/protocol"

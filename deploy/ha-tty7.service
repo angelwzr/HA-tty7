@@ -1,0 +1,14 @@
+[Unit]
+Description=Read-only tty7 agent status for Home Assistant
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/ha-tty7/venv/bin/ha-tty7 --config %h/.config/ha-tty7/collector.toml
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
