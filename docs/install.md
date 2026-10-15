@@ -1,6 +1,6 @@
 # Install HA-tty7
 
-> Use matching 0.4.2 integration and collector versions. Update/restart HA first, then run the reporter installer. Reload existing OMP processes once. A release does not authorize deployment to a household instance.
+> Use matching 0.4.2 integration and collector versions. Update/restart HA first, then run the reporter installer. Existing OMP processes need `/restart` after their work finishes. A release does not authorize deployment to a household instance.
 
 ## Home Assistant
 
@@ -74,7 +74,7 @@ Exit 0 proves successful HTTP delivery of a valid roster; inspect HA's roster en
 
 The managed reporter is the default for **every OhMyPi pane**. There is no status-source opt-in or per-pane configuration. Other agent types keep stock tty7 reporting.
 
-The host installer registers `~/.omp/agent/extensions/ha-tty7-status/index.ts`. New OMP processes load it through normal extension discovery. Existing processes must reload plugins or start again; the installer sends no terminal input and never changes tty7's generated hook. Disabling OMP extension discovery also disables native reporting.
+The host installer registers `~/.omp/agent/extensions/ha-tty7-status/index.ts`. New OMP processes load it through normal extension discovery. Existing OMP 18.10.3 sessions require `/restart` after foreground and background work finishes. `/reload-plugins` refreshes other resources but does not import newly installed extension modules; session-data reload is not extension reload either. There is no supported external non-disruptive hot-load API. The installer sends no terminal input, stops no OMP work, and never changes tty7's generated hook. Disabling OMP extension discovery also disables native reporting.
 
 | Native observation | HA behavior |
 | --- | --- |
@@ -164,7 +164,7 @@ Templates change notification text only. Existing notification toggles, baseline
 
 1. Update/restart the HA integration **first**.
 2. Run the matching host installer, preserving its existing virtual environment, private TOML and pairing URL.
-3. Reload plugins or restart already-running OMP processes to discover the managed extension.
+3. In each already-running OMP process, use `/restart` only after its foreground and background work finishes. A new process/runtime is required to import the extension; do not use signals or session-file reload as a substitute.
 
 New HA accepts older collector records. Older HA rejects the new native metadata: update HA before the host reporter. A missing native report is deliberately Unknown, not an older collector's guessed status. Scalar summaries from older missing-provenance records remain honest about unknown origin.
 

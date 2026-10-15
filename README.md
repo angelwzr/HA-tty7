@@ -2,7 +2,7 @@
 
 Your tty7 agent sessions in Home Assistant. Read-only: no terminal access or remote controls.
 
-> **0.4.2:** native OMP status is automatic. Update HA first, then the host reporter; reload existing OMP processes once. [Release notes](CHANGELOG.md#042---2026-10-15) · [Downloads](https://github.com/angelwzr/HA-tty7/releases/tag/v0.4.2)
+> **0.4.2:** native OMP status is automatic. Update HA first, then the host reporter; restart existing OMP processes once their work is finished. [Release notes](CHANGELOG.md#042---2026-10-15) · [Downloads](https://github.com/angelwzr/HA-tty7/releases/tag/v0.4.2)
 
 ## Install
 
@@ -43,7 +43,7 @@ Hosts sort by name; unknown-status rows stay hidden unless selected. Diagnostics
 
 **Native OMP reporting is the default for every OhMyPi pane.** The host installer registers one managed extension; there is no per-pane toggle.
 
-- New OMP processes pick it up automatically. Existing processes must reload plugins or start again.
+- New OMP processes pick it up automatically. In existing OMP 18.10.3 sessions, run `/restart` only after foreground/background work finishes; `/reload-plugins` does not import new extensions.
 - Only the main session owns pane status. Child agents cannot overwrite it; pending continuations/background work keep it Working.
 - Missing, stale or conflicting native reports become **Unknown**, with a card warning—not guessed Idle/Done.
 - Completion means the observed main activity ended, not that the entire task succeeded. Each run alerts at most once.
@@ -78,7 +78,7 @@ Terminal contents, conversations, messages, paths, arguments, process/port data,
 
 1. Update/restart the **HA integration first**.
 2. Run the matching host reporter installer; it preserves pairing and updates the managed OMP extension.
-3. Reload plugins or start new OMP processes for already-running sessions. The installer does not inject terminal input.
+3. In each already-running OMP session, use `/restart` after its work finishes. The installer never injects input or stops active jobs.
 
 [Upgrade details](docs/install.md#updates-and-removal) · [Changelog](CHANGELOG.md)
 

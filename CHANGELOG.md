@@ -31,7 +31,7 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 ### Upgrade requirements
 
 - Update/restart HA first, then run the matching host reporter installer. New OMP processes use the native reporter automatically.
-- Existing OMP processes must reload plugins or restart themselves to discover the managed extension; no terminal input is injected.
+- Existing OMP 18.10.3 processes need `/restart` after foreground/background work finishes; `/reload-plugins` cannot import new extension modules. No terminal input is injected and active sessions are not stopped.
 - Native OMP activity/turn counters stay unavailable rather than retaining tty7's child-contaminated counters. Model/effort metadata collection is unchanged.
 - Independent desktop-to-phone forwarding remains an OS setting; use one phone-alert route to avoid duplicate OMP/tty7 and HA pushes.
 
