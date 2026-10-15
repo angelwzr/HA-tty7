@@ -1,7 +1,7 @@
 import { LitElement, html, nothing, svg } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import type { AgentView, CardConfig, HomeAssistant, HostView, TabView } from './contracts';
-import { DEFAULT_STATUSES } from './contracts';
+import { DEFAULT_STATUSES, OMP_STATES } from './contracts';
 import { deriveHostView, validateConfig } from './state';
 import { cardStyles } from './styles';
 import { formatTimestamp } from './datetime';
@@ -76,10 +76,12 @@ export class HaTty7Card extends LitElement {
     const reportOrigin = origin(agent);
     const details: [string, string | number | null][] = [
       [this.t('agent'), agent.agent], [this.t('status'), statusLabel], [this.t('pane'), agent.pane_id], [this.t('session'), agent.session_id],
-      [this.t('provenance'), this.t(reportOrigin === 'unknown' ? 'unknown_origin' : reportOrigin)],
+      [this.t('provenance'), agent.omp ? this.t('omp_native') : this.t(reportOrigin === 'unknown' ? 'unknown_origin' : reportOrigin)],
       [this.t('activity'), agent.activity], [this.t('turns'), agent.turns], [this.t('model'), model], [this.t('effort'), effort],
       [this.t('permission'), agent.permission_mode],
     ];
+    if (agent.omp) details.push([this.t('omp_status'), this.t(`omp_${agent.omp.state}`)],
+      [this.t('background_jobs'), agent.omp.background_jobs]);
     if (agent.model === null || agent.effort === null) details.push([this.t('model'), this.t('capability_unknown')]);
     if (tab) details.push([this.t('workspace'), tab.workspace_id], [this.t('tab'), tab.tab_id]);
     if (pane) details.push([this.t('live'), pane.live === null ? this.t('not_reported') : this.t(pane.live ? 'live' : 'not_live')],
@@ -145,6 +147,8 @@ export class HaTty7Card extends LitElement {
     const filtered = filterAgents(host.agents, this.config!);
     const confirmed = Object.values(host.confirmedCounts).reduce((sum, count) => sum + count, 0);
     const noticeKey = `notice_${host.state}` as MessageKey;
+    const nativeUnavailable = OMP_STATES.filter(state => state !== 'ready'
+      && host.agents.some(agent => agent.omp?.state === state));
     return html`<section aria-label=${host.config.name}>
       <div class="host-head"><div class="host-title"><h2>${host.config.name}</h2><span class="host-state" data-state=${host.state} role="status">${this.t(host.state)}</span></div>
         ${this.config?.show_last_contact ? html`<p class="receipt">${host.lastContact === null ? this.t('no_receipt') : html`${this.t('last_contact')}: <time datetime=${host.lastContact}>${formatTimestamp(host.lastContact, this.currentHass)}</time>`}</p>` : nothing}
@@ -154,6 +158,7 @@ export class HaTty7Card extends LitElement {
         ${this.config?.show_filtered_count ? html`<p class="filtered-count">${filtered.length} / ${host.agents.length} ${this.t('filtered')}</p>` : nothing}
       </div>
       ${host.state !== 'healthy' ? html`<p class="notice">${this.t(noticeKey)}${host.errorCode ? html` ${this.t(host.errorCode)}.` : nothing}</p>` : nothing}
+      ${nativeUnavailable.length ? html`<p class="notice omp-warning" role="status">${this.t('omp_unavailable')} · ${nativeUnavailable.map(state => this.t(`omp_${state}`)).join(', ')}</p>` : nothing}
       ${this.config?.show_inventory_status || host.inventoryState === 'error' || host.inventoryState === 'stale' || host.inventory && !host.inventory.consistent ? html`<p class="notice inventory-state" data-inventory-state=${host.inventoryState}>${this.t(`inventory_${host.inventoryState}`)}${host.inventoryErrorCode ? html` · ${this.t(host.inventoryErrorCode)}` : nothing}${host.inventory && !host.inventory.consistent ? html` · ${this.t('inventory_pending')}` : nothing}</p>` : nothing}
       ${this.config?.show_inventory_last_contact && host.inventoryLastContact ? html`<p class="notice inventory-contact">${this.t('inventory_contact')}: <time datetime=${host.inventoryLastContact}>${formatTimestamp(host.inventoryLastContact, this.currentHass)}</time></p>` : nothing}
       ${this.config?.show_inventory_last_success && host.inventoryLastSuccess ? html`<p class="notice inventory-success">${this.t('inventory_success')}: <time datetime=${host.inventoryLastSuccess}>${formatTimestamp(host.inventoryLastSuccess, this.currentHass)}</time></p>` : nothing}

@@ -43,6 +43,9 @@ class HostController:
         self.inventory_last_success: datetime | None = None
         self.inventory_error_code: str | None = None
         self.source: SourceInfo | None = None
+        # One current main-run marker per pane, host-local and never serialized.
+        # Retain markers through missing-source/roster flaps, not event history.
+        self._native_runs: dict[int, tuple[str, str | None, bool]] = {}
 
     @property
     def state(self) -> int | str:
@@ -112,6 +115,9 @@ class HostController:
         except (KeyError, ValueError, TypeError, PayloadError):
             return
         self.agents = agents
+        for agent in agents:
+            if "omp" in agent:
+                self._native_transition(agent, None, False)
         self.collector_ok = ok
         self.error_code = code
         self.last_contact = contact
@@ -217,10 +223,38 @@ class HostController:
             return {}
         return {"tab_name": tab["name"], "workspace_name": workspaces[0]["name"]}
 
+    def _native_transition(
+        self, agent: AgentRecord, previous: AgentRecord | None, was_ready: bool,
+    ) -> str | None:
+        """Consume native done baselines as well as emitted completions."""
+        native = agent.get("omp")
+        if (native is None or native["state"] != "ready" or agent.get("rich") is not True
+                or agent.get("inferred", False) or agent["session_id"] is None):
+            return None
+        pane, session, run = agent["pane_id"], agent["session_id"], native["run_id"]
+        marker = self._native_runs.get(pane)
+        consumed = marker is not None and marker[:2] == (session, run) and marker[2]
+        prior_native = previous.get("omp") if previous is not None else None
+        same_run = (
+            previous is not None and prior_native is not None and prior_native["state"] == "ready"
+            and previous.get("rich") is True and not previous.get("inferred", False)
+            and previous["session_id"] == session and prior_native["run_id"] == run
+        )
+        kind = None
+        if was_ready and same_run and run is not None:
+            if agent["status"] == "waiting" and previous["status"] in ("idle", "working", "done"):
+                kind = "needs_input"
+            elif agent["status"] == "done" and previous["status"] in ("working", "waiting") and not consumed:
+                kind = "completed"
+        self._native_runs.pop(pane, None)
+        self._native_runs[pane] = (session, run, consumed or agent["status"] == "done")
+        return kind
+
     def accept(self, report: Snapshot | ErrorReport, now: datetime) -> list[dict[str, Any]]:
         """Consume a shared-protocol-validated, host-bound report."""
         self.expire(now)
         was_ready = self.online
+        previous_agents = {agent["pane_id"]: agent for agent in self.agents}
         previous = {(agent["session_id"], agent["pane_id"]):
                     "unknown" if agent.get("inferred", False) or agent.get("rich") is False else agent["status"]
                     for agent in self.agents}
@@ -244,9 +278,19 @@ class HostController:
         self.error_code = None
         self.last_success = now
         self._state = len(self.agents)
-        if not was_ready:
-            return events
+        current_native = {agent["pane_id"] for agent in self.agents if "omp" in agent}
+        absent = [pane for pane in self._native_runs if pane not in current_native]
+        spare = max(0, 256 - len(current_native))
+        for pane in absent[:max(0, len(absent) - spare)]:
+            del self._native_runs[pane]
         for agent in self.agents:
+            if "omp" in agent:
+                kind = self._native_transition(agent, previous_agents.get(agent["pane_id"]), was_ready)
+                if kind is not None:
+                    events.append(dict(agent, kind=kind, **self._notification_names(agent["pane_id"])))
+                continue
+            if not was_ready:
+                continue
             if agent.get("inferred", False) or agent.get("rich") is False:
                 continue
             prior = previous.get((agent["session_id"], agent["pane_id"]))

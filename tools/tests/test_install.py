@@ -22,10 +22,10 @@ class InstallerTests(unittest.TestCase):
         self.home = Path(self.temporary.name)
         self.paths = self.installer.Paths(self.home)
 
-    def wheel(self, version="0.4.1", name="ha-tty7"):
-        wheel = self.home / "ha_tty7-0.4.1-py3-none-any.whl"
+    def wheel(self, version="0.4.2", name="ha-tty7"):
+        wheel = self.home / "ha_tty7-0.4.2-py3-none-any.whl"
         with zipfile.ZipFile(wheel, "w") as archive:
-            archive.writestr("ha_tty7-0.4.1.dist-info/METADATA",
+            archive.writestr("ha_tty7-0.4.2.dist-info/METADATA",
                              f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
         return wheel
 
@@ -82,7 +82,7 @@ class InstallerTests(unittest.TestCase):
                 self.installer.private_read(self.paths.url)
 
     def test_wrong_distribution_or_release_fails_before_install(self):
-        for version, name in (("0.4.0", "ha-tty7"), ("0.4.1", "other-package")):
+        for version, name in (("0.4.0", "ha-tty7"), ("0.4.2", "other-package")):
             with self.subTest(version=version, name=name):
                 with self.assertRaises(self.installer.InstallError):
                     self.installer.validate_wheel(self.wheel(version, name))
@@ -121,6 +121,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(b"NoNewPrivileges=true", first)
 
     def test_no_service_does_not_create_units_or_call_service_manager(self):
+        from ha_tty7.omp_install import install_extension
         self.prepare()
         self.installer.write_private_new(self.paths.config, b'host_id="synthetic"\ntty7_path="/usr/bin/tty7"\nwebhook_url_file="webhook-url"\n')
         self.installer.write_private_new(self.paths.url, b"https://ha.invalid/api/webhook/synthetic\n")
@@ -128,7 +129,9 @@ class InstallerTests(unittest.TestCase):
                                   ca_file=None, tty7_config_dir=None)
         # pip/stock CLI/HTTPS are external; filesystem and installer orchestration are real.
         with patch.object(self.installer, "install_wheel"), \
-                patch.object(self.installer, "verify_source"), \
+                patch.object(self.installer, "install_omp_extension", side_effect=lambda paths: install_extension(paths.home)), \
+                patch.object(self.installer, "verify_source", side_effect=lambda paths: self.assertTrue(
+                    (paths.home / ".omp/agent/extensions/ha-tty7-status/index.ts").is_file())), \
                 patch.object(self.installer, "verify_delivery"), \
                 patch.object(self.installer, "service_action", side_effect=AssertionError("systemctl in manual mode")):
             self.installer.install(args, home=self.home)
@@ -137,12 +140,14 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(self.paths.url.read_bytes(), b"https://ha.invalid/api/webhook/synthetic\n")
 
     def test_failed_delivery_never_enables_or_creates_service(self):
+        from ha_tty7.omp_install import install_extension
         self.prepare()
         self.installer.write_private_new(self.paths.config, b'host_id="synthetic"\ntty7_path="/usr/bin/tty7"\nwebhook_url_file="webhook-url"\n')
         self.installer.write_private_new(self.paths.url, b"https://ha.invalid/api/webhook/synthetic\n")
         args = argparse.Namespace(wheel=self.wheel(), tty7=None, no_service=False,
                                   ca_file=None, tty7_config_dir=None)
         with patch.object(self.installer, "install_wheel"), \
+                patch.object(self.installer, "install_omp_extension", side_effect=lambda paths: install_extension(paths.home)), \
                 patch.object(self.installer, "verify_source"), \
                 patch.object(self.installer, "verify_delivery",
                              side_effect=self.installer.InstallError("delivery failed")), \
@@ -168,6 +173,130 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(copied.stat().st_mode), 0o700)
         self.assertEqual(copied.stat().st_uid, os.getuid())
 
+
+    def test_distro_venv_boundary_allows_exact_interpreter_not_external_code(self):
+        import sys
+        self.prepare()
+        self.paths.venv.mkdir(mode=0o755)
+        (self.paths.venv / "bin").mkdir()
+        (self.paths.venv / "lib").mkdir()
+        (self.paths.venv / "bin/python").symlink_to(Path(sys.executable).resolve())
+        (self.paths.venv / "bin/𝜋thon").symlink_to(Path(sys.executable).resolve())
+        (self.paths.venv / "lib64").symlink_to("lib")
+        self.installer.check_venv(self.paths)
+        code = self.paths.venv / "lib/external.py"
+        code.symlink_to(Path(sys.executable).resolve())
+        with self.assertRaises(self.installer.InstallError):
+            self.installer.check_venv(self.paths)
+        code.unlink()
+        self.paths.data.chmod(0o755)
+        with self.assertRaises(self.installer.InstallError):
+            self.installer.check_venv(self.paths)
+
+    def test_managed_extension_is_private_idempotent_and_preserves_custom_files(self):
+        from ha_tty7.omp_install import install_extension
+        extension = install_extension(self.home)
+        self.assertEqual(extension, self.home / ".omp/agent/extensions/ha-tty7-status/index.ts")
+        self.assertEqual(stat.S_IMODE(extension.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(extension.parent.stat().st_mode), 0o700)
+        content, stamp = extension.read_bytes(), extension.stat().st_mtime_ns
+        self.assertTrue(content)
+        install_extension(self.home)
+        self.assertEqual(extension.stat().st_mtime_ns, stamp)
+        custom = extension.parent.parent / "custom.ts"
+        custom.write_text("// custom")
+        extension.write_text("// custom replacement")
+        with self.assertRaises(ValueError):
+            install_extension(self.home)
+        self.assertEqual(extension.read_text(), "// custom replacement")
+        self.assertEqual(custom.read_text(), "// custom")
+
+    def test_extension_installer_refuses_symlinked_managed_target(self):
+        from ha_tty7.omp_install import install_extension
+        extension = install_extension(self.home)
+        extension.unlink()
+        target = self.home / "untouched.ts"
+        target.write_text("// untouched")
+        extension.symlink_to(target)
+        with self.assertRaises(ValueError):
+            install_extension(self.home)
+        self.assertEqual(target.read_text(), "// untouched")
+
+    def test_extension_installer_refuses_public_managed_directory(self):
+        from ha_tty7.omp_install import install_extension
+        extension = install_extension(self.home)
+        original = extension.read_bytes()
+        extension.parent.chmod(0o755)
+        with self.assertRaises(ValueError):
+            install_extension(self.home)
+        self.assertEqual(extension.read_bytes(), original)
+
+    def test_distro_venv_boundary_rejects_other_interpreter_and_public_root(self):
+        import sys
+        self.prepare()
+        self.paths.venv.mkdir(mode=0o755)
+        (self.paths.venv / "bin").mkdir()
+        other = self.home / "other-python"
+        other.write_bytes(b"not-the-running-interpreter")
+        other.chmod(0o700)
+        link = self.paths.venv / "bin/𝜋thon"
+        link.symlink_to(other)
+        with self.assertRaises(self.installer.InstallError):
+            self.installer.check_venv(self.paths)
+        link.unlink()
+        link.symlink_to(Path(sys.executable).resolve())
+        self.paths.venv.chmod(0o777)
+        with self.assertRaises(self.installer.InstallError):
+            self.installer.check_venv(self.paths)
+
+    def test_managed_extension_update_preserves_omp_settings(self):
+        import hashlib
+        from ha_tty7.omp_install import install_extension
+        extension = install_extension(self.home)
+        packaged = extension.read_bytes()
+        settings = self.home / ".omp/agent/settings.json"
+        settings.write_bytes(b'{"custom_setting":true}')
+        previous = b"// previous managed release\n"
+        extension.write_bytes(previous)
+        (extension.parent / ".managed-sha256").write_text(hashlib.sha256(previous).hexdigest() + "\n")
+        install_extension(self.home)
+        self.assertEqual(extension.read_bytes(), packaged)
+        self.assertEqual(settings.read_bytes(), b'{"custom_setting":true}')
+
+    def test_extension_installer_refuses_symlinked_omp_root(self):
+        from ha_tty7.omp_install import install_extension
+        target = self.home / "external-omp"
+        target.mkdir()
+        (self.home / ".omp").symlink_to(target, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            install_extension(self.home)
+        self.assertEqual(list(target.iterdir()), [])
+
+    def test_installer_missing_flock_fails_before_managed_files_or_network(self):
+        args = argparse.Namespace(wheel=self.wheel(), tty7=None, no_service=True,
+                                  ca_file=None, tty7_config_dir=None)
+        with patch.object(self.installer.shutil, "which", return_value=None), \
+                patch.object(self.installer, "install_wheel"), \
+                patch.object(self.installer, "install_omp_extension"), \
+                patch.object(self.installer, "find_cli", side_effect=self.installer.InstallError(
+                    "Stock CLI lookup reached before dependency preflight.")):
+            with self.assertRaisesRegex(self.installer.InstallError, "util-linux"):
+                self.installer.install(args, home=self.home)
+        self.assertFalse(self.paths.data.exists())
+
+    def test_manual_extension_helper_missing_flock_is_actionable_and_writes_nothing(self):
+        import contextlib
+        import io
+        import shutil
+        from ha_tty7.omp_install import install_extension, main
+        with patch.object(shutil, "which", return_value=None):
+            with self.assertRaisesRegex(ValueError, "util-linux"):
+                install_extension(self.home)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(main(["--home", str(self.home)]), 1)
+            self.assertIn("util-linux", output.getvalue())
+        self.assertFalse((self.home / ".omp").exists())
 
 if __name__ == "__main__":
     unittest.main()

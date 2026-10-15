@@ -1,5 +1,5 @@
-import { ERROR_CODES, INFORMATION_OPTIONS, STATUSES } from './contracts';
-import type { AgentRecord, AgentStatus, CardConfig, Counts, ErrorCode, HassStates, HostConfig, HostView } from './contracts';
+import { ERROR_CODES, INFORMATION_OPTIONS, OMP_STATES, STATUSES } from './contracts';
+import type { AgentRecord, AgentStatus, CardConfig, Counts, ErrorCode, HassStates, HostConfig, HostView, OmpSource } from './contracts';
 import { parseInventory, origin } from './inventory';
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -62,6 +62,16 @@ export function validateConfig(value: unknown): CardConfig {
   };
 }
 
+function parseOmp(value: unknown): OmpSource | null {
+  if (!object(value) || Object.keys(value).length !== 3
+    || !Object.hasOwn(value, 'state') || !Object.hasOwn(value, 'run_id') || !Object.hasOwn(value, 'background_jobs')
+    || !OMP_STATES.includes(value.state as OmpSource['state'])
+    || (value.run_id !== null && !boundedString(value.run_id, 128))
+    || (value.background_jobs !== null && !safeNumber(value.background_jobs))) return null;
+  return { state: value.state as OmpSource['state'], run_id: value.run_id as string | null,
+    background_jobs: value.background_jobs as number | null };
+}
+
 function parseAgent(value: unknown): AgentRecord | null {
   if (!object(value) || !safeNumber(value.pane_id) || value.pane_id === 0 || !boundedString(value.agent, 64)) return null;
   if (Object.hasOwn(value, 'inferred') && typeof value.inferred !== 'boolean') return null;
@@ -73,6 +83,19 @@ function parseAgent(value: unknown): AgentRecord | null {
   for (const key of ['activity', 'turns']) {
     if (value[key] !== undefined && value[key] !== null && !safeNumber(value[key])) return null;
   }
+  let omp: OmpSource | undefined;
+  if (Object.hasOwn(value, 'omp')) {
+    const parsed = parseOmp(value.omp);
+    if (!parsed || value.agent !== 'OhMyPi' || !STATUSES.includes(value.status as AgentStatus)
+      || value.activity !== null || value.turns !== null) return null;
+    if (parsed.state === 'ready') {
+      if (value.rich !== true || value.inferred === true || !boundedString(value.session_id, 128)
+        || parsed.background_jobs === null) return null;
+    } else if (value.status !== 'unknown' || value.session_id !== null
+      || value.rich !== false || value.inferred === true
+      || parsed.run_id !== null || parsed.background_jobs !== null) return null;
+    omp = parsed;
+  }
   // Reconstruct an allowlist. Unknown attributes, including action/icon URLs, never reach rendering.
   return {
     pane_id: value.pane_id,
@@ -81,6 +104,7 @@ function parseAgent(value: unknown): AgentRecord | null {
     status: STATUSES.includes(value.status as AgentStatus) ? value.status as AgentStatus : 'unknown',
     ...(value.inferred === true ? { inferred: true } : {}),
     ...(typeof value.rich === 'boolean' ? { rich: value.rich } : {}),
+    ...(omp ? { omp } : {}),
     activity: (value.activity as number | null | undefined) ?? null,
     turns: (value.turns as number | null | undefined) ?? null,
     model: (value.model as string | null | undefined) ?? null,

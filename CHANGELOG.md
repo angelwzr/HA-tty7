@@ -4,6 +4,37 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-15
+
+### Added
+
+- Managed OMP-native status reporting, installed automatically for every Oh My Pi main session in tty7; no per-pane opt-in.
+- Explicit native-source health and owner-scoped background-job count, with compact missing-source warnings and expanded details.
+
+### Changed
+
+- Native OMP status takes precedence over tty7's generic OMP hooks. Other agents keep their existing stock sources.
+- Child agents, queued continuations and pending background deliveries cannot declare their parent pane finished.
+- A completion means an observed main activity stretch ended, not that the user's entire task succeeded.
+
+### Fixed
+
+- Reopening the same native run no longer generates repeated completion notifications; initial/reconnected/recovered sources establish silent baselines.
+- Legitimate distro Python aliases and non-writable legacy venv roots under the private managed directory no longer block installation.
+
+### Security
+
+- OMP writes only bounded scalar status metadata into private, atomic local records; pairing credentials remain solely in the HTTPS collector.
+- Missing, stale, unsupported, malformed or conflicting native reports become Unknown, never a guessed tty7 Idle/Done fallback.
+- No tty7 patch, private wire protocol, terminal scraping, tool arguments/results or conversation export.
+
+### Upgrade requirements
+
+- Update/restart HA first, then run the matching host reporter installer. New OMP processes use the native reporter automatically.
+- Existing OMP processes must reload plugins or restart themselves to discover the managed extension; no terminal input is injected.
+- Native OMP activity/turn counters stay unavailable rather than retaining tty7's child-contaminated counters. Model/effort metadata collection is unchanged.
+- Independent desktop-to-phone forwarding remains an OS setting; use one phone-alert route to avoid duplicate OMP/tty7 and HA pushes.
+
 ## [0.4.1] - 2026-10-15
 
 ### Added
@@ -101,7 +132,8 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 - Bundled card, visual editor and automatic frontend loading.
 - Host-bound HTTPS ingestion, freshness handling, restoration and optional notifications.
 
-[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/angelwzr/HA-tty7/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/angelwzr/HA-tty7/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/angelwzr/HA-tty7/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/angelwzr/HA-tty7/releases/tag/v0.3.0

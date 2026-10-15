@@ -1,6 +1,6 @@
 # tty7 status card
 
-Read-only Lovelace card for HA-tty7. It bundles Lit locally, makes no collector requests, loads no external assets, and exposes no tty7 controls. It works with the original v1 roster and optional stock-CLI inventory. Source diagnostics stay in Home Assistant entities/diagnostics, not in this card.
+Read-only Lovelace card for HA-tty7. It bundles Lit locally, makes no collector requests, loads no external assets, and exposes no tty7 controls. It works with the original v1 roster, optional stock-CLI inventory and default OMP-native status metadata. Source versions/diagnostics stay in Home Assistant entities/diagnostics, not in this card.
 
 ## Add it in Home Assistant
 
@@ -65,6 +65,7 @@ The editor uses native HA `ha-selector` controls throughout: text for title/labe
 The default is compact: card title, outer host headings and health, session/tab name and status. Hosts are always outer groups, ordered by display label then roster entity ID (fixed English collation); workspace/tab grouping is an explicit within-host choice. No auxiliary lines or empty metadata gaps appear until individually enabled.
 
 - **Reported** means roster membership, not confirmed hook coverage. **Confirmed** requires `rich=true` and not inferred. `rich=false` is a weak report; absent `rich` has unknown origin. Explicit inferred status stays inferred; it does not become a confirmed completion.
+- **OhMyPi uses native main-session status by default.** Child sessions cannot overwrite it. Missing/stale/unsupported/invalid/conflicting native reports are Unknown; their essential source warning remains visible even when Unknown rows are filtered out. Healthy native rows add no collapsed strings. Expanded details show native source health and owner-scoped background jobs; native activity/turn counters are unavailable. Done describes an observed main activity ending, not task success.
 - **Filters are local.** Filtered / total reported counts and unfiltered summaries are independently opt-in. Filters never change HA summary counts, alerts, or baselines. Inventory-only detections are not added to the reported-agent denominator. Unknown reports, plain tabs, detections without a report and unreported orphans are hidden unless `statuses` includes `unknown`.
 - **Hide missing compact metadata.** Null/blank model, unreported effort and absent session IDs do not create collapsed placeholders or empty metadata lines. Details explain Not reported / Capability unknown; source versions never prove capability. Explicit effort `""` is a reported None applicable value, not missing data. Activity counts reported tool completions; turns count reported settles, including interruption inference—not successful tasks or elapsed time.
 - **Names require collector consent.** Only approved inventory names are used. Explicit tab names take precedence over separately approved derived labels; origin annotations and secondary agent types are independent opt-ins. No terminal, process title, path, Git, configuration, conversation, or log lookup fills missing names/models.

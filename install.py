@@ -20,7 +20,7 @@ from urllib.request import HTTPRedirectHandler, build_opener
 import warnings
 import zipfile
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 WHEEL_NAME = f"ha_tty7-{VERSION}-py3-none-any.whl"
 WHEEL_URL = f"https://github.com/angelwzr/HA-tty7/releases/download/v{VERSION}/{WHEEL_NAME}"
 MAX_WHEEL_BYTES = 32 * 1024 * 1024
@@ -212,7 +212,7 @@ def validate_wheel(path: Path) -> None:
             names, versions = metadata.get_all("Name", []), metadata.get_all("Version", [])
             if (len(names) != 1 or re.sub(r"[-_.]+", "-", names[0]).lower() != "ha-tty7"
                     or versions != [VERSION]):
-                raise InstallError("Wheel distribution Name/Version must be ha-tty7 0.4.1.")
+                raise InstallError("Wheel distribution Name/Version must be ha-tty7 0.4.2.")
     except (OSError, zipfile.BadZipFile, KeyError, RuntimeError):
         raise InstallError("Cannot read a valid reporter release wheel.") from None
 
@@ -238,23 +238,32 @@ def download_wheel(destination: Path) -> None:
                     stream.write(chunk)
         destination.chmod(0o600)
     except (OSError, ValueError):
-        raise InstallError("Verified HTTPS release download failed; check the published v0.4.1 asset and network trust.") from None
+        raise InstallError("Verified HTTPS release download failed; check the published v0.4.2 asset and network trust.") from None
 
 
 def check_venv(paths: Paths) -> None:
-    directory(paths.venv, private=True)
+    # Distribution venv roots may be 0755; their managed data boundary must stay 0700.
+    directory(paths.data, private=True)
+    directory(paths.venv, private=False)
+    interpreter = Path(sys.executable).resolve(strict=True)
+    check_ancestors(interpreter)
+    info = interpreter.stat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid())
+            or info.st_mode & 0o022 or not os.access(interpreter, os.X_OK)):
+        raise InstallError("The running Python interpreter is unsafe.")
     for root, dirs, files in os.walk(paths.venv, followlinks=False):
         for name in dirs + files:
             path = Path(root) / name
             info = path.lstat()
             if stat.S_ISLNK(info.st_mode):
-                # Standard venv links only; never permit arbitrary pip/config/code links.
-                target = path.resolve()
-                python_link = (path.parent == paths.venv / "bin" and
-                               name in ("python", "python3", f"python{sys.version_info.major}.{sys.version_info.minor}")
-                               and target == Path(sys.executable).resolve())
-                lib_link = path == paths.venv / "lib64" and target == paths.venv / "lib"
-                if not (python_link or lib_link):
+                # Distro-specific bin aliases are safe only for this exact verified interpreter.
+                try:
+                    target = path.resolve(strict=True)
+                except (OSError, RuntimeError):
+                    raise InstallError("Unsafe symlink in existing reporter virtual environment.") from None
+                python_link = path.parent == paths.venv / "bin" and target == interpreter
+                lib_link = path == paths.venv / "lib64" and os.readlink(path) == "lib"
+                if info.st_uid != os.getuid() or not (python_link or lib_link):
                     raise InstallError("Unsafe symlink in existing reporter virtual environment.")
             elif (not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
                   or info.st_uid != os.getuid() or info.st_mode & 0o022):
@@ -275,8 +284,14 @@ def install_wheel(paths: Paths, wheel: Path) -> None:
              "--no-deps", "--no-cache-dir", "--disable-pip-version-check", "--only-binary=:all:", str(wheel)],
             "Pinned reporter wheel installation failed.", timeout=180)
     command([str(paths.python), "-I", "-c",
-             "from importlib.metadata import version; assert version('ha-tty7') == '0.4.1'"],
-            "Installed reporter distribution is not version 0.4.1.")
+             "from importlib.metadata import version; assert version('ha-tty7') == '0.4.2'"],
+            "Installed reporter distribution is not version 0.4.2.")
+
+def install_omp_extension(paths: Paths) -> None:
+    command([str(paths.python), "-I", "-m", "ha_tty7.omp_install", "--home", str(paths.home)],
+            "OMP status extension installation failed; unsafe or custom extension files were preserved.")
+    print("OMP status reporter installed. Reload plugins or start a new OMP process for existing sessions; no session input was sent.")
+
 
 
 def find_cli(supplied: Path | None) -> Path:
@@ -328,7 +343,7 @@ def verify_source(paths: Paths) -> None:
 
 def verify_delivery(paths: Paths) -> None:
     command([str(paths.python), "-I", "-m", "ha_tty7", "--config", str(paths.config), "--once"],
-            "Real roster delivery failed; update the HA integration to 0.4.1 and check pairing, verified TLS and stock tty7. Service was not enabled.", timeout=30)
+            "Real roster delivery failed; update the HA integration to 0.4.2 and check pairing, verified TLS and stock tty7. Service was not enabled.", timeout=30)
 
 
 def prepare_service_directory(paths: Paths) -> None:
@@ -369,6 +384,8 @@ def service_action(*arguments: str) -> None:
 
 def install(args: argparse.Namespace, *, home: Path | None = None) -> None:
     paths = Paths(home if home is not None else Path.home())
+    if shutil.which("flock") is None:
+        raise InstallError("OMP status reporting requires flock (util-linux); install util-linux using your distribution package manager, then retry.")
     prepare_directories(paths)
     raw = existing_config(paths)
     # Check existing private files before any pip/network operation.
@@ -378,17 +395,18 @@ def install(args: argparse.Namespace, *, home: Path | None = None) -> None:
     with tempfile.TemporaryDirectory(prefix="install-", dir=paths.data) as temporary:
         wheel = args.wheel.expanduser().absolute() if args.wheel is not None else Path(temporary) / WHEEL_NAME
         if args.wheel is None:
-            print("Downloading pinned reporter 0.4.1 over verified HTTPS.")
+            print("Downloading pinned reporter 0.4.2 over verified HTTPS.")
             download_wheel(wheel)
         validate_wheel(wheel)
         install_wheel(paths, wheel)
+    install_omp_extension(paths)
     if raw is None:
         tty7 = stabilize_cli(paths, find_cli(args.tty7))
     else:
         tty7 = Path(raw["tty7_path"])
     prepare_config(paths, tty7, args.ca_file, args.tty7_config_dir)
     verify_source(paths)
-    print("Ensure the Home Assistant integration is updated to 0.4.1; verifying one real roster delivery.")
+    print("Ensure the Home Assistant integration is updated to 0.4.2; verifying one real roster delivery.")
     verify_delivery(paths)
     if args.no_service:
         print("Delivery verified. Manual mode: no service-manager action was performed.")
@@ -408,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
         "New setup prompts for Host ID and a hidden pairing HTTPS URL. Existing private configuration, "
         "pairing and privacy choices are preserved. No secret arguments, sudo or HA token. "
         "A real verified-HTTPS delivery is required, including in manual mode."))
-    parser.add_argument("--wheel", type=Path, help="Explicit local ha-tty7 0.4.1 wheel (offline package installation)")
+    parser.add_argument("--wheel", type=Path, help="Explicit local ha-tty7 0.4.2 wheel (offline package installation)")
     parser.add_argument("--tty7", type=Path, help="Stock tty7 CLI path; otherwise find tty7 on PATH")
     parser.add_argument("--ca-file", type=Path, help="Trusted PEM CA for new pairing; never disables TLS verification")
     parser.add_argument("--tty7-config-dir", type=Path, help="Stock tty7 server directory for new setup (not read by installer)")

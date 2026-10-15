@@ -138,6 +138,9 @@ class InventoryCollectorTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        home = patch("pathlib.Path.home", return_value=self.root)
+        home.start()
+        self.addCleanup(home.stop)
 
     def config(self, outputs=None, **options):
         executable = self.root / "tty7-test"

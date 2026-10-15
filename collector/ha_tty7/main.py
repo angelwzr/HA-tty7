@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 
 from .config import CollectorConfig, ConfigError, load_config
+from .omp import apply_native_status
 from .protocol import (
     ErrorReport, InventoryReport, PayloadError, Snapshot, SourceInfo,
     build_error, build_snapshot, encode_report,
@@ -76,7 +77,7 @@ def collect_report(
 ) -> Snapshot | ErrorReport:
     """Read a fresh roster, keeping optional failures scoped to their sections."""
     try:
-        agents = read_agents(config)
+        agents = apply_native_status(read_agents(config))
         if sampler is None:
             sampler = Sampler()
         sampler.sample(config, time.monotonic() if now is None else now)

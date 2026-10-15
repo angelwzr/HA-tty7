@@ -1,5 +1,11 @@
 export const STATUSES = ['idle', 'working', 'waiting', 'done', 'unknown'] as const;
 export type AgentStatus = (typeof STATUSES)[number];
+export const OMP_STATES = ['ready', 'missing', 'stale', 'invalid', 'conflict', 'unsupported'] as const;
+export interface OmpSource {
+  state: (typeof OMP_STATES)[number];
+  run_id: string | null;
+  background_jobs: number | null;
+}
 export const DEFAULT_STATUSES: readonly AgentStatus[] = ['idle', 'working', 'waiting', 'done'];
 export const INFORMATION_OPTIONS = [
   'show_last_contact', 'show_last_success', 'show_summary', 'show_inventory_summary', 'show_filtered_count',
@@ -71,6 +77,7 @@ export interface AgentRecord {
   status: AgentStatus;
   inferred?: boolean;
   rich?: boolean;
+  omp?: OmpSource;
   activity: number | null;
   turns: number | null;
   model: string | null;

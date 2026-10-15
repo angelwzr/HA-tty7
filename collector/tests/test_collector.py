@@ -25,6 +25,9 @@ class CollectorTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        home = patch('pathlib.Path.home', return_value=self.root)
+        home.start()
+        self.addCleanup(home.stop)
 
     def executable(self, program):
         path = self.root / 'tty7-test'

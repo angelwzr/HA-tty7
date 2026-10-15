@@ -12,6 +12,7 @@ from typing import Literal, NotRequired, TypedDict, cast
 
 
 Status = Literal["idle", "working", "waiting", "done", "unknown"]
+OmpState = Literal["ready", "missing", "stale", "invalid", "conflict", "unsupported"]
 ErrorCode = Literal[
     "cli_unavailable", "cli_timeout", "cli_failed", "invalid_payload", "payload_too_large"
 ]
@@ -25,6 +26,7 @@ MAX_PANES = 512
 MAX_SAFE_INTEGER = (1 << 53) - 1
 
 _STATUSES = frozenset({"idle", "working", "waiting", "done", "unknown"})
+_OMP_STATES = frozenset({"ready", "missing", "stale", "invalid", "conflict", "unsupported"})
 _ERROR_CODES = frozenset({
     "cli_unavailable", "cli_timeout", "cli_failed", "invalid_payload", "payload_too_large"
 })
@@ -34,6 +36,12 @@ _AGENT_FIELDS = frozenset({
     "model", "effort", "permission_mode",
 })
 _COMMON_FIELDS = frozenset({"schema_version", "host_id", "kind"})
+
+
+class OmpStatus(TypedDict):
+    state: OmpState
+    run_id: str | None
+    background_jobs: int | None
 
 
 class AgentRecord(TypedDict):
@@ -48,6 +56,7 @@ class AgentRecord(TypedDict):
     permission_mode: str | None
     inferred: NotRequired[bool]
     rich: NotRequired[bool]
+    omp: NotRequired[OmpStatus]
 
 
 class WorkspaceRecord(TypedDict):
@@ -213,6 +222,30 @@ def _record_fields(
     return record
 
 
+def _omp_status(value: object, record: AgentRecord) -> OmpStatus:
+    data = _object(value, {"state", "run_id", "background_jobs"})
+    state = data["state"]
+    if not isinstance(state, str) or state not in _OMP_STATES:
+        raise PayloadError()
+    result = OmpStatus(
+        state=cast(OmpState, state),
+        run_id=_text(data["run_id"], 128, nullable=True),
+        background_jobs=_integer(data["background_jobs"], nullable=True),
+    )
+    if (record["agent"] != "OhMyPi" or record["activity"] is not None
+            or record["turns"] is not None or record.get("inferred", False)):
+        raise PayloadError()
+    if state == "ready":
+        if (record.get("rich") is not True or record["session_id"] is None
+                or result["background_jobs"] is None):
+            raise PayloadError()
+    elif (record["status"] != "unknown" or record["session_id"] is not None
+            or record.get("rich") is not False or result["run_id"] is not None
+            or result["background_jobs"] is not None):
+        raise PayloadError()
+    return result
+
+
 def _roster(value: object, *, source: bool) -> list[AgentRecord]:
     if not isinstance(value, list):
         raise PayloadError()
@@ -233,10 +266,12 @@ def _roster(value: object, *, source: bool) -> list[AgentRecord]:
             elif not isinstance(readout, dict):
                 raise PayloadError()
         else:
-            if item.keys() - {"inferred", "rich"} != _AGENT_FIELDS:
+            if item.keys() - {"inferred", "rich", "omp"} != _AGENT_FIELDS:
                 raise PayloadError()
             state = readout = item
         record = _record_fields(item.get("pane_id"), item.get("agent"), state, readout, source=source)
+        if not source and "omp" in item:
+            record["omp"] = _omp_status(item["omp"], record)
         pane = record["pane_id"]
         if pane in panes:
             raise PayloadError()

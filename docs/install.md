@@ -1,6 +1,6 @@
 # Install HA-tty7
 
-> Use matching 0.4.1 integration and collector versions. Update/restart HA first, then run the reporter installer. A release does not authorize deployment to a household instance.
+> Use matching 0.4.2 integration and collector versions. Update/restart HA first, then run the reporter installer. Reload existing OMP processes once. A release does not authorize deployment to a household instance.
 
 ## Home Assistant
 
@@ -14,18 +14,18 @@ HACS installs only the HA side. Each Linux user/host needs its own collector and
 
 ## Linux collector
 
-Requirements: Python 3.11+, stock tty7 CLI at a stable absolute path, verified HTTPS access to HA.
+Requirements: Linux, Python 3.11+, util-linux `flock`, stock tty7 CLI at a stable absolute path, verified HTTPS access to HA. The installer reports missing dependencies; it never installs system packages or uses sudo.
 
 Download the pinned installer, review it, then run it:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.1/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.2/install.py \
   --output install-ha-tty7.py
 python3 install-ha-tty7.py
 ```
 
-New setup prompts for the HA host ID and a hidden pairing URL. Existing private pairing/settings are preserved without prompts. The script installs the pinned reporter wheel in a private virtual environment, validates stock tty7 and verified HTTPS delivery, then enables/restarts only the user reporter service. It never needs sudo, an HA account token, lingering or a TLS bypass. Existing custom units are preserved with a review warning.
+New setup prompts for the HA host ID and a hidden pairing URL. Existing private pairing/settings are preserved without prompts. The script installs the pinned reporter wheel and managed global OMP extension, validates stock tty7 and verified HTTPS delivery, then enables/restarts only the user reporter service. It never needs sudo, an HA account token, lingering or a TLS bypass. Existing custom units are preserved with a review warning.
 
 | Installer option | Purpose |
 | --- | --- |
@@ -42,8 +42,10 @@ Conflicting overrides to existing settings are refused rather than silently chan
 From a matching downloaded source checkout:
 
 ```sh
+install -d -m 700 ~/.local/share/ha-tty7
 python3 -m venv ~/.local/share/ha-tty7/venv
 ~/.local/share/ha-tty7/venv/bin/python -m pip install .
+~/.local/share/ha-tty7/venv/bin/python -I -m ha_tty7.omp_install
 install -d -m 700 ~/.config/ha-tty7
 install -m 600 examples/collector.toml ~/.config/ha-tty7/collector.toml
 ```
@@ -67,6 +69,29 @@ Test a single delivery:
 ```
 
 Exit 0 proves successful HTTP delivery of a valid roster; inspect HA's roster entity to confirm ingestion. Exit 1 means collection/validation/delivery failed. Exit 2 means invalid/private configuration. Logs contain fixed codes only.
+
+## Oh My Pi native status
+
+The managed reporter is the default for **every OhMyPi pane**. There is no status-source opt-in or per-pane configuration. Other agent types keep stock tty7 reporting.
+
+The host installer registers `~/.omp/agent/extensions/ha-tty7-status/index.ts`. New OMP processes load it through normal extension discovery. Existing processes must reload plugins or start again; the installer sends no terminal input and never changes tty7's generated hook. Disabling OMP extension discovery also disables native reporting.
+
+| Native observation | HA behavior |
+| --- | --- |
+| Main session, queued continuation, running owner jobs or pending result delivery | Working |
+| Explicit ask/approval awaiting input | Waiting |
+| Initial main session with no observed activity | Idle, not completion |
+| Observed main activity ended with no pending work | Done; not proof of overall task success |
+| Missing, stale, unsupported, invalid or conflicting reporter | Unknown with a concise card warning; no tty7 status fallback |
+
+Child sessions never own pane status. Completion notifications are bounded/deduplicated per main session/run; reconnection and source recovery establish silent baselines. Source health and owner background count are in expanded details only. Native activity/turn counters remain unavailable instead of retaining tty7's child-contaminated counts. Models, effort and permission metadata still come only from existing allowlisted stock fields.
+
+The credential-free OMP extension writes exact scalar records into `~/.local/share/ha-tty7/omp-status/`: directory 0700, files 0600, atomic publication, two-second heartbeat and ten-second freshness. A permanent private lock coordinates publication and expired-record cleanup; it is not a network listener. No messages, tool arguments/results, command lines or job labels are written. The Python collector alone holds the pairing URL and sends the existing verified HTTPS reports.
+
+Public OMP APIs are verified against 18.10.3; unavailable APIs report Unknown. This does not repair tty7's own GUI status/desktop notification hooks. To avoid duplicate phone pushes, choose either HA Companion notifications or forwarded OMP/tty7 desktop notifications—not both. Installation does not silently rewrite OS notification settings.
+
+Manual wheel/source users must run `python -I -m ha_tty7.omp_install` from the reporter virtual environment once after upgrading; the normal installer runs it automatically.
+
 
 ## Optional names and inventory
 
@@ -138,10 +163,10 @@ Templates change notification text only. Existing notification toggles, baseline
 ## Updates and removal
 
 1. Update/restart the HA integration **first**.
-2. Reinstall the matching collector in its existing virtual environment.
-3. Restart only `ha-tty7.service`. Keep its private TOML and pairing URL.
+2. Run the matching host installer, preserving its existing virtual environment, private TOML and pairing URL.
+3. Reload plugins or restart already-running OMP processes to discover the managed extension.
 
-New HA accepts older collector records. Older HA versions reject new optional inventory/source sections and larger reports. Scalar summaries from older missing-provenance records remain honest about unknown origin.
+New HA accepts older collector records. Older HA rejects the new native metadata: update HA before the host reporter. A missing native report is deliberately Unknown, not an older collector's guessed status. Scalar summaries from older missing-provenance records remain honest about unknown origin.
 
 To stop/remove a collector:
 

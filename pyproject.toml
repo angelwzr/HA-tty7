@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-tty7"
-version = "0.4.1"
+version = "0.4.2"
 description = "Read-only tty7 agent-status integration for Home Assistant"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,3 +19,6 @@ packages = ["ha_tty7", "ha_tty7.protocol"]
 [tool.setuptools.package-dir]
 ha_tty7 = "collector/ha_tty7"
 "ha_tty7.protocol" = "custom_components/ha_tty7/protocol"
+
+[tool.setuptools.package-data]
+ha_tty7 = ["omp_extension.ts"]
