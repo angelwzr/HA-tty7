@@ -43,9 +43,9 @@ afterEach(async () => { await emit("session_shutdown"); globalThis.setInterval =
 
 test("factory and all child callbacks do no filesystem IO and cannot overwrite main", async () => {
   expect(files()).toEqual([]); expect(timers.size).toBe(0);
-  await emit("session_start", {}, context("subagent")); expect(files()).toEqual([]);
+  await emit("session_start", {}, context("sub")); expect(files()).toEqual([]);
   await emit("session_start"); const first = record();
-  for (const name of handlers.keys()) await emit(name, { willContinue: false, toolName: "ask", toolCallId: "private-child" }, context("subagent"));
+  for (const name of handlers.keys()) await emit(name, { willContinue: false, toolName: "ask", toolCallId: "private-child" }, context("sub"));
   expect(record()).toEqual(first); expect(timers.size).toBe(1);
 });
 test("initial idle is not completion and unavailable API is unsupported", async () => {
