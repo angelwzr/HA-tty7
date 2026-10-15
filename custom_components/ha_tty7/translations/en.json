@@ -12,7 +12,11 @@
           "notify_destination": "Notification destination",
           "notify_waiting": "Notify when an agent needs input",
           "notify_completion": "Notify when a working agent completes",
-          "dashboard_path": "Local dashboard path"
+          "dashboard_path": "Local dashboard path",
+          "retain_inventory": "Allow inventory and its private names in Home Assistant restore storage"
+        },
+        "data_description": {
+          "retain_inventory": "Off by default. Inventory is still displayed live. Enabling this explicitly allows workspace/tab/group names and derived labels received from your collector to be saved locally across Home Assistant restarts. It never restores fresh health. Disable to remove inventory from subsequent restore writes."
         }
       },
       "pairing": {
@@ -37,14 +41,18 @@
     "step": {
       "init": {
         "title": "Configure host and notifications",
-        "description": "Changing settings reloads this host and reconfirms its notification baseline. Its wire host ID and private credential stay fixed; remove the host to revoke the credential.",
+        "description": "Changing settings reloads this host and reconfirms its notification baseline. Its wire host ID and private credential stay fixed; remove the host to revoke the credential. Inventory names are received only with collector consent. Keeping them across Home Assistant restarts requires separate restore-storage consent below.",
         "data": {
           "label": "Host display label",
           "base_url": "Verified HTTPS Home Assistant base URL",
           "notify_destination": "Notification destination",
           "notify_waiting": "Notify when an agent needs input",
           "notify_completion": "Notify when a working agent completes",
-          "dashboard_path": "Local dashboard path"
+          "dashboard_path": "Local dashboard path",
+          "retain_inventory": "Allow inventory and its private names in Home Assistant restore storage"
+        },
+        "data_description": {
+          "retain_inventory": "Off by default. Enabling this saves last-known inventory, including any approved private names and labels, in local restore storage. Restored data stays unconfirmed until a new inventory sample. Disable to remove it from subsequent restore writes."
         }
       },
       "pairing": {
@@ -58,6 +66,37 @@
       "invalid_destination": "Choose no notifications, persistent notifications, or an existing Companion mobile-app action.",
       "invalid_dashboard": "Enter a local dashboard path such as /lovelace/agents.",
       "invalid_toggle": "Choose on or off."
+    }
+  },
+  "entity": {
+    "binary_sensor": {"connectivity": {"name": "Connectivity"}},
+    "sensor": {
+      "roster": {"name": "Roster"},
+      "reported_agents": {"name": "Reported agents"},
+      "working_agents": {"name": "Confirmed working agents"},
+      "waiting_agents": {"name": "Confirmed waiting agents"},
+      "done_agents": {"name": "Confirmed done agents"},
+      "idle_agents": {"name": "Confirmed idle agents"},
+      "unknown_agents": {"name": "Confirmed unknown-state agents"},
+      "inferred_agents": {"name": "Inferred agents"},
+      "weak_reports": {"name": "Weak reports"},
+      "unknown_origin_agents": {"name": "Unknown-origin agents"},
+      "health": {"name": "Roster health", "state": {
+        "healthy": "Healthy", "unconfirmed": "Unconfirmed", "error": "Collection error", "stale": "Stale"
+      }},
+      "last_contact": {"name": "Last collector contact"},
+      "last_success": {"name": "Last roster success"},
+      "workspaces": {"name": "Workspaces"},
+      "tabs": {"name": "Tabs"},
+      "panes": {"name": "Panes"},
+      "live_panes": {"name": "Live panes"},
+      "hibernated_tabs": {"name": "Hibernated tabs"},
+      "orphan_panes": {"name": "Orphan panes"},
+      "tty7_build": {"name": "tty7 build"},
+      "collector_version": {"name": "Collector version"},
+      "control_version": {"name": "Control version"},
+      "protocol_version": {"name": "Protocol version"},
+      "uptime": {"name": "Source uptime (last sampled)"}
     }
   }
 }

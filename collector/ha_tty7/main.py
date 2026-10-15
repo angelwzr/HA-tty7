@@ -7,9 +7,12 @@ from pathlib import Path
 import time
 
 from .config import CollectorConfig, ConfigError, load_config
-from .protocol import ErrorReport, PayloadError, Snapshot, build_error, build_snapshot, encode_report
+from .protocol import (
+    ErrorReport, InventoryReport, PayloadError, Snapshot, SourceInfo,
+    build_error, build_snapshot, encode_report,
+)
 from .transport import DeliveryError, post_report
-from .tty7 import CollectorError, read_agents
+from .tty7 import CollectorError, read_agents, read_inventory, read_source
 
 _LOG = logging.getLogger("ha_tty7")
 
@@ -37,24 +40,79 @@ class DeliveryState:
             self.last_report = report
 
 
-def collect_report(config: CollectorConfig) -> Snapshot | ErrorReport:
-    """Return a complete fresh snapshot, or a fixed failure without a roster."""
+@dataclass
+class Sampler:
+    """Cache optional observations, not fabricated new inventory observations."""
+
+    config: CollectorConfig | None = field(default=None, repr=False)
+    last_sample: float | None = None
+    inventory: InventoryReport | None = field(default=None, repr=False)
+    source: SourceInfo | None = field(default=None, repr=False)
+
+    def sample(self, config: CollectorConfig, now: float) -> None:
+        if self.config != config:
+            self.config = config
+            self.last_sample = None
+            self.inventory = None
+            self.source = None
+        if self.last_sample is not None and now - self.last_sample < config.heartbeat_seconds:
+            return
+        self.last_sample = now
+        if config.collect_inventory:
+            try:
+                self.inventory = read_inventory(config)
+            except (CollectorError, PayloadError) as error:
+                self.inventory = {
+                    "kind": "error", "error_code": error.code,
+                    "names_included": config.include_names,
+                    "derived_labels_included": config.include_names and config.include_derived_labels,
+                }
+        if config.collect_source:
+            self.source = read_source(config)
+
+
+def collect_report(
+    config: CollectorConfig, *, sampler: Sampler | None = None, now: float | None = None,
+) -> Snapshot | ErrorReport:
+    """Read a fresh roster, keeping optional failures scoped to their sections."""
     try:
-        report = build_snapshot(config.host_id, read_agents(config))
-        # Check encoded size here so oversize becomes a deliverable error report.
-        encode_report(report)
+        agents = read_agents(config)
+        if sampler is None:
+            sampler = Sampler()
+        sampler.sample(config, time.monotonic() if now is None else now)
+        report = build_snapshot(config.host_id, agents,
+                                inventory=sampler.inventory, source=sampler.source)
+        # Size errors in optional inventory must not invalidate a healthy roster.
+        try:
+            encode_report(report)
+        except PayloadError as error:
+            if error.code != "payload_too_large" or "inventory" not in report:
+                raise
+            sampler.inventory = {
+                "kind": "error", "error_code": error.code,
+                "names_included": config.include_names,
+                "derived_labels_included": config.include_names and config.include_derived_labels,
+            }
+            report = build_snapshot(config.host_id, agents,
+                                    inventory=sampler.inventory, source=sampler.source)
+            encode_report(report)
         return report
     except (CollectorError, PayloadError) as error:
-        return build_error(config.host_id, error.code)
+        return build_error(config.host_id, error.code, inventory_privacy={
+            "enabled": config.collect_inventory,
+            "names_included": config.include_names,
+            "derived_labels_included": config.include_derived_labels,
+        })
 
 
 def run(config: CollectorConfig, *, once: bool = False) -> int:
     state = DeliveryState(config.heartbeat_seconds, config.poll_seconds)
+    sampler = Sampler()
     last_health: str | None = None
     try:
         while True:
             started = time.monotonic()
-            report = collect_report(config)
+            report = collect_report(config, sampler=sampler)
             health = report.get("error_code", "snapshot")
             if health != last_health:
                 _LOG.info("collector_state=%s", health)

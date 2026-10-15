@@ -8,19 +8,17 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (
-    "README.md", "LICENSE", "hacs.json", "pyproject.toml", ".gitignore",
-    "docs/install.md", "tools/build_release.py", "tools/export_public.py",
+    "README.md", "CHANGELOG.md", "LICENSE", "hacs.json", "pyproject.toml", ".gitignore",
+    "docs/install.md", "tools/build_release.py", "tools/export_public.py", "tools/release_notes.py",
     "card/package.json", "card/package-lock.json", "card/tsconfig.json",
     "card/vite.config.ts", "card/playwright.config.ts", "card/index.html", "card/README.md",
     "integration-tests/README.md", "integration-tests/conftest.py",
-    "upstream/tty7-26.10.0-omp-reporting.patch",
-    "upstream/TTY7_LICENSE.txt",
 )
 DIRECTORIES = (
     "custom_components/ha_tty7", "collector", "deploy", "examples",
-    "card/src", "card/test", "card/dev", "card/e2e", "integration-tests",
+    "card/src", "card/test", "card/dev", "card/e2e", "integration-tests", "tools/tests",
 )
-SUFFIXES = {".py", ".json", ".toml", ".service", ".ts", ".html", ".md", ".js", ".png", ".txt", ".patch"}
+SUFFIXES = {".py", ".json", ".toml", ".service", ".ts", ".html", ".md", ".js", ".png", ".txt"}
 FORBIDDEN_PARTS = {".git", ".storage", "__pycache__", "node_modules", ".pytest_cache", "test-results", "runtime"}
 
 
@@ -36,7 +34,8 @@ def export(destination: Path) -> int:
     for path in sorted(paths):
         relative = path.relative_to(ROOT)
         if (not path.is_file() or path.is_symlink() or path.suffix not in SUFFIXES and relative.as_posix() not in FILES
-                or any(part in FORBIDDEN_PARTS or part.startswith(".") and part != ".gitignore" for part in relative.parts)
+                or any(part in FORBIDDEN_PARTS or part.endswith((".egg-info", ".dist-info"))
+                       or part.startswith(".") and part != ".gitignore" for part in relative.parts)
                 or path.name.endswith((".secret", ".local.toml", ".local.json"))):
             continue
         # Fail rather than silently publish known environment-specific content.

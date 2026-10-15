@@ -128,7 +128,7 @@ async def test_two_hosts_native_registry_malformed_isolation_and_health(hass, ha
     forbidden = build_snapshot("desktop_demo", [record()])
     forbidden["agents"][0]["launch_argv"] = "excluded"
     invalid = [b"not-json", b'\xff', b'{"schema_version":1,"schema_version":1}',
-               json.dumps(forbidden).encode(), b" " * (64 * 1024 + 1),
+               json.dumps(forbidden).encode(), b" " * (256 * 1024 + 1),
                encode_report(build_snapshot("laptop_demo", [record("done")]))]
     for body in invalid:
         assert (await post(client, desktop, body=body)).status in (400, 413)
@@ -292,3 +292,234 @@ async def test_notification_toggles_are_independent(hass, hass_client, hass_ws_c
     assert await notifications(ws) == []
     await post(client, entry, [record("waiting")])
     assert len(await notifications(ws)) == 1
+
+
+def extended_body(entry, *, sample="sample-one", inventory_enabled=True, inventory_error=False,
+                  source_available=True):
+    from test_controller import inventory
+    report = build_snapshot(entry.data["host_id"], [record()])
+    if inventory_enabled:
+        report["inventory"] = ({"kind": "error", "error_code": "cli_failed"} if inventory_error
+                               else inventory(sample))
+    report["source"] = {"state": "available" if source_available else "unavailable",
+                        "collector_version": "0.4.0", "tty7_build": "stock-build" if source_available else None,
+                        "control_version": 3 if source_available else None,
+                        "protocol_version": 1 if source_available else None,
+                        "uptime_secs": 123 if source_available else None}
+    return json.dumps(report).encode()
+
+
+def role_entity(hass, entry, role):
+    registry = er.async_get(hass)
+    matches = [entity for entity in er.async_entries_for_config_entry(registry, entry.entry_id)
+               if entity.translation_key == role]
+    assert len(matches) == 1, f"Expected one integration-owned {role} role"
+    return matches[0]
+
+
+async def test_native_summary_roles_and_independent_inventory_source_health(hass, hass_client):
+    entry = await add_host(hass)
+    client = await hass_client()
+    roster = role_entity(hass, entry, "roster")
+    connectivity = role_entity(hass, entry, "connectivity")
+    reported = role_entity(hass, entry, "reported_agents")
+    workspaces = role_entity(hass, entry, "workspaces")
+    health = role_entity(hass, entry, "health")
+    build = role_entity(hass, entry, "tty7_build")
+    for role in ("working_agents", "waiting_agents", "done_agents", "idle_agents", "unknown_agents",
+                 "inferred_agents", "weak_reports", "unknown_origin_agents", "last_contact",
+                 "last_success", "tabs", "panes", "live_panes", "hibernated_tabs", "orphan_panes",
+                 "collector_version", "control_version", "protocol_version", "uptime"):
+        assert role_entity(hass, entry, role).device_id == roster.device_id
+    assert len({entity.device_id for entity in (roster, connectivity, reported, workspaces, build)}) == 1
+    assert hass.states.get(reported.entity_id).state == "unavailable"
+    assert hass.states.get(workspaces.entity_id).state == "unavailable"
+    assert hass.states.get(health.entity_id).state == "unconfirmed"
+    assert (await post(client, entry, body=extended_body(entry))).status == 204
+    assert hass.states.get(reported.entity_id).state == "1"
+    assert hass.states.get(workspaces.entity_id).state == "1"
+    assert hass.states.get(role_entity(hass, entry, "unknown_origin_agents").entity_id).state == "1"
+    assert hass.states.get(role_entity(hass, entry, "weak_reports").entity_id).state == "0"
+    assert hass.states.get(role_entity(hass, entry, "inferred_agents").entity_id).state == "0"
+    assert hass.states.get(build.entity_id).state == "stock-build"
+    assert "agents" not in hass.states.get(reported.entity_id).attributes
+    assert "inventory" not in hass.states.get(workspaces.entity_id).attributes
+    first_success = hass.states.get(roster.entity_id).attributes["inventory_last_success"]
+    future = dt_util.utcnow() + timedelta(seconds=46)
+    entry.runtime_data.controller.accept(
+        json.loads(extended_body(entry)), future)
+    entry.runtime_data.publish()
+    assert hass.states.get(reported.entity_id).state == "1"
+    assert hass.states.get(workspaces.entity_id).state == "unavailable"
+    assert hass.states.get(roster.entity_id).attributes["inventory_state"] == "stale"
+    assert hass.states.get(roster.entity_id).attributes["inventory_last_success"] == first_success
+    assert (await post(client, entry, body=extended_body(entry, inventory_error=True,
+                                                       source_available=False))).status == 204
+    assert hass.states.get(roster.entity_id).attributes["inventory"]["tabs"][0]["name"] == "Private tab"
+    assert hass.states.get(workspaces.entity_id).state == "unavailable"
+    assert hass.states.get(reported.entity_id).state == "1"
+    assert hass.states.get(build.entity_id).state == "unavailable"
+    revoked = json.loads(extended_body(entry, inventory_error=True))
+    revoked["inventory"].update(names_included=False, derived_labels_included=False)
+    assert (await post(client, entry, body=json.dumps(revoked).encode())).status == 204
+    private_inventory = hass.states.get(roster.entity_id).attributes["inventory"]
+    assert private_inventory["tabs"][0]["name"] is None
+    assert private_inventory["tabs"][0]["label"] is None
+    assert private_inventory["workspaces"][0]["name"] is None
+    assert hass.states.get(roster.entity_id).attributes["inventory_last_success"] == first_success
+    assert (await post(client, entry, body=extended_body(entry, sample="sample-two"))).status == 204
+    assert hass.states.get(workspaces.entity_id).state == "1"
+    assert (await post(client, entry, body=extended_body(entry, inventory_enabled=False))).status == 204
+    assert hass.states.get(roster.entity_id).attributes["inventory"] is None
+    assert hass.states.get(workspaces.entity_id).state == "unavailable"
+    assert (await post(client, entry, body=encode_report(build_error("desktop_demo", "cli_failed")))).status == 204
+    assert hass.states.get(reported.entity_id).state == "unavailable"
+    assert hass.states.get(health.entity_id).state == "error"
+
+
+async def test_native_inventory_restore_retention_consent_and_diagnostics_privacy(hass, hass_client):
+    entry = await add_host(hass)
+    assert entry.options.get("retain_inventory") is False
+    await async_setup_component(hass, "diagnostics", {})
+    client = await hass_client()
+    assert (await post(client, entry, body=extended_body(entry))).status == 204
+    roster_id, _ = entity_ids(hass, entry)
+    response = await client.get(f"/api/diagnostics/config_entry/{entry.entry_id}")
+    assert response.status == 200
+    download = await response.json()
+    diagnostics = download["data"]
+    serialized = json.dumps(download)
+    for private in ("Private workspace", "Private tab", "Private group", "Private derived label",
+                    "private-workspace-id", "private-tab-id", "private-group-id", "synthetic-session",
+                    entry.data["webhook_id"], "ha.example", "/lovelace/agents"):
+        assert private not in serialized
+    assert diagnostics["inventory"]["workspace_count"] == 1
+    assert diagnostics["source"]["tty7_build"] == "stock-build"
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(roster_id).attributes["inventory"] is None
+    assert (await post(client, entry, body=extended_body(entry, sample="sample-retain"))).status == 204
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    changed = inputs(retain_inventory=True)
+    changed.pop("host_id")
+    pairing = await hass.config_entries.options.async_configure(flow["flow_id"], changed)
+    assert pairing["step_id"] == "pairing"
+    await hass.config_entries.options.async_configure(flow["flow_id"], {})
+    await hass.async_block_till_done()
+    # Consent permits future storage, not resurrection of a previously discarded snapshot.
+    assert (await post(client, entry, body=extended_body(entry, sample="sample-retained-new"))).status == 204
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    from homeassistant.helpers.storage import Store
+    assert (await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_load())["inventory"]["tabs"][0]["name"] == "Private tab"
+    restored = hass.states.get(roster_id)
+    assert restored.attributes["inventory"]["tabs"][0]["name"] == "Private tab"
+    assert restored.attributes["inventory_state"] == "unconfirmed"
+    assert hass.states.get(role_entity(hass, entry, "tabs").entity_id).state == "unavailable"
+    assert (await post(client, entry, body=extended_body(entry, sample="sample-retained-new"))).status == 204
+    assert hass.states.get(roster_id).attributes["inventory_state"] == "unconfirmed"
+    assert (await post(client, entry, body=extended_body(entry, sample="sample-after-restart"))).status == 204
+    assert hass.states.get(role_entity(hass, entry, "tabs").entity_id).state == "1"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert (await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_load())["inventory"]["tabs"][0]["name"] == "Private tab"
+    changed["retain_inventory"] = False
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    confirmation = await hass.config_entries.options.async_configure(flow["flow_id"], changed)
+    assert confirmation["type"] is FlowResultType.FORM
+    assert confirmation["step_id"] == "pairing"
+    committed = await hass.config_entries.options.async_configure(flow["flow_id"], {})
+    assert committed["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["retain_inventory"] is False
+    await hass.async_block_till_done()
+    assert (await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_load())["inventory"] is None
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(roster_id).attributes["inventory"] is None
+
+
+async def test_native_default_restore_storage_never_persists_inventory(hass, hass_client):
+    from homeassistant.helpers.restore_state import async_get
+    from homeassistant.helpers.storage import Store
+    entry = await add_host(hass)
+    client = await hass_client()
+    assert (await post(client, entry, body=extended_body(entry))).status == 204
+    assert entry.options["retain_inventory"] is False
+    roster_id, _ = entity_ids(hass, entry)
+    assert hass.states.get(roster_id).attributes["inventory"]["tabs"][0]["name"] == "Private tab"
+    stored = async_get(hass).async_get_stored_states()
+    for item in stored:
+        if item.state.entity_id == roster_id:
+            assert item.state.attributes.get("inventory") is None
+            assert item.extra_data.as_dict().get("inventory") is None
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    data = await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_load()
+    assert data is not None
+    assert data["inventory"] is None
+    assert "Private tab" not in json.dumps(data)
+
+
+async def test_native_status_summaries_count_only_confirmed_hooks(hass, hass_client):
+    entry = await add_host(hass)
+    client = await hass_client()
+    rows = [
+        record(pane=1) | {"rich": True},
+        record(pane=2) | {"rich": False},
+        record(pane=3) | {"rich": True, "inferred": True},
+        record(pane=4),
+        record("waiting", pane=5) | {"rich": True},
+        record("waiting", pane=6) | {"rich": False},
+        record("done", pane=7) | {"rich": True},
+        record("done", pane=8) | {"inferred": True},
+        record("idle", pane=9) | {"rich": True},
+        record("idle", pane=10),
+        record("unknown", pane=11) | {"rich": True},
+        record("unknown", pane=12) | {"rich": False},
+    ]
+    assert (await post(client, entry, rows)).status == 204
+    assert hass.states.get(role_entity(hass, entry, "reported_agents").entity_id).state == "12"
+    for role in ("working_agents", "waiting_agents", "done_agents", "idle_agents", "unknown_agents"):
+        assert hass.states.get(role_entity(hass, entry, role).entity_id).state == "1"
+    assert hass.states.get(role_entity(hass, entry, "inferred_agents").entity_id).state == "2"
+    assert hass.states.get(role_entity(hass, entry, "weak_reports").entity_id).state == "3"
+    assert hass.states.get(role_entity(hass, entry, "unknown_origin_agents").entity_id).state == "2"
+
+
+async def test_native_roster_errors_revoke_private_inventory_and_retention(hass, hass_client):
+    from homeassistant.helpers.storage import Store
+    entry = await add_host(hass)
+    changed = inputs(retain_inventory=True)
+    changed.pop("host_id")
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(flow["flow_id"], changed)
+    await hass.config_entries.options.async_configure(flow["flow_id"], {})
+    await hass.async_block_till_done()
+    client = await hass_client()
+    assert (await post(client, entry, body=extended_body(entry))).status == 204
+    roster_id, _ = entity_ids(hass, entry)
+    last_success = hass.states.get(roster_id).attributes["inventory_last_success"]
+    error = build_error(entry.data["host_id"], "cli_failed")
+    error["inventory_privacy"] = {
+        "enabled": True, "names_included": False, "derived_labels_included": False}
+    assert (await post(client, entry, body=json.dumps(error).encode())).status == 204
+    state = hass.states.get(roster_id)
+    assert state.state == "error"
+    assert state.attributes["inventory"]["tabs"][0]["name"] is None
+    assert state.attributes["inventory"]["tabs"][0]["group_name"] is None
+    assert state.attributes["inventory"]["tabs"][0]["label"] is None
+    assert state.attributes["inventory"]["workspaces"][0]["name"] is None
+    assert state.attributes["inventory_last_success"] == last_success
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    stored = await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_load()
+    assert stored["inventory"]["tabs"][0]["name"] is None
+    assert "Private" not in json.dumps(stored["inventory"])
+    error["inventory_privacy"]["enabled"] = False
+    assert (await post(client, entry, body=json.dumps(error).encode())).status == 204
+    assert hass.states.get(roster_id).attributes["inventory"] is None
+    assert hass.states.get(roster_id).attributes["inventory_state"] == "disabled"
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    stored = await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_load()
+    assert stored["inventory"] is None

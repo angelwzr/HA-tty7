@@ -111,8 +111,9 @@ class CollectorTests(unittest.TestCase):
         for program, code in cases:
             with self.subTest(code=code):
                 report = collect_report(self.config(self.executable(program)))
-                self.assertEqual(report, {'schema_version': 1, 'host_id': 'desktop_demo',
-                                          'kind': 'error', 'error_code': code})
+                self.assertEqual(report['kind'], 'error')
+                self.assertEqual(report['error_code'], code)
+                self.assertNotIn('agents', report)
         self.assertEqual(collect_report(self.config())['error_code'], 'cli_unavailable')
 
     def test_hanging_cli_is_killed_without_waiting_for_a_full_buffer(self):

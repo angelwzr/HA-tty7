@@ -3,7 +3,7 @@
 import json
 import unittest
 
-from ha_tty7.protocol import PayloadError, decode_report, validate_report
+from ha_tty7.protocol import MAX_BODY_BYTES, PayloadError, decode_report, validate_report
 
 
 class DecodeTests(unittest.TestCase):
@@ -38,7 +38,7 @@ class DecodeTests(unittest.TestCase):
                     decode_report(body, "desktop_demo")
 
     def test_original_body_size_is_bounded_before_parsing(self):
-        body = b' ' * 65537
+        body = b' ' * (MAX_BODY_BYTES + 1)
         with self.assertRaises(PayloadError) as caught:
             decode_report(body, "desktop_demo")
         self.assertEqual(caught.exception.code, "payload_too_large")

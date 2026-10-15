@@ -13,6 +13,14 @@ export interface CardConfig {
   hosts: HostConfig[];
   title?: string;
   appearance?: 'tty7' | 'home-assistant';
+  group_by?: 'host' | 'workspace' | 'tab';
+  show_summary?: boolean;
+  show_model?: boolean;
+  show_effort?: boolean;
+  show_session_id?: boolean;
+  statuses?: AgentStatus[];
+  agent_types?: string[];
+  include_inferred?: boolean;
 }
 export interface HassEntity {
   state: string;
@@ -25,6 +33,7 @@ export interface EntityRegistryEntry {
   platform?: string;
   device_id?: string;
   hidden?: boolean;
+  translation_key?: string;
 }
 export interface DeviceRegistryEntry {
   id: string;
@@ -58,6 +67,7 @@ export interface AgentRecord {
   agent: string;
   status: AgentStatus;
   inferred?: boolean;
+  rich?: boolean;
   activity: number | null;
   turns: number | null;
   model: string | null;
@@ -75,7 +85,39 @@ export interface RosterAttributes {
   last_contact: string | null;
   last_success: string | null;
   baseline_ready: boolean;
+  confirmed_counts?: Counts;
+  inferred_count?: number;
+  weak_count?: number;
+  unknown_origin_count?: number;
+  inventory?: InventorySnapshot | null;
+  inventory_state?: InventoryState;
+  inventory_last_contact?: string | null;
+  inventory_last_success?: string | null;
+  inventory_error_code?: ErrorCode | null;
+  source?: SourceInfo | null;
 }
+export interface WorkspaceRecord { workspace_id: string; name: string | null; tab_count: number; pane_count: number }
+export interface TabRecord {
+  workspace_id: string; tab_id: string; ordinal: number | null; name: string | null; label: string | null;
+  detected_agent: string | null; pane_ids: number[]; group_id: string | null; group_name: string | null; hibernated: boolean;
+}
+export interface PaneRecord {
+  pane_id: number; workspace_id: string | null; tab_id: string | null; live: boolean | null; hibernated: boolean; orphan: boolean;
+}
+export interface InventorySnapshot {
+  kind: 'snapshot'; sample_id: string; workspaces: WorkspaceRecord[]; tabs: TabRecord[]; panes: PaneRecord[];
+  consistent: boolean; names_included: boolean; derived_labels_included: boolean;
+}
+export type InventoryState = 'disabled' | 'unconfirmed' | 'healthy' | 'error' | 'stale';
+export interface SourceInfo {
+  state: 'available' | 'unavailable'; collector_version: string; tty7_build: string | null;
+  control_version: number | null; protocol_version: number | null; uptime_secs: number | null;
+}
+export type ReportOrigin = 'inferred' | 'structured_hook' | 'weak_report' | 'unknown';
+export interface TabView {
+  identity: string; tab: TabRecord; agents: AgentView[]; representative: AgentView | null;
+}
+export interface WorkspaceView { identity: string; workspace: WorkspaceRecord; tabs: TabView[] }
 export type HostState = 'loading' | 'healthy' | 'empty' | 'error' | 'stale' | 'unconfirmed' | 'malformed' | 'disconnected' | 'offline';
 export interface HostView {
   config: HostConfig;
@@ -86,4 +128,14 @@ export interface HostView {
   lastSuccess: string | null;
   errorCode: ErrorCode | null;
   lastKnown: boolean;
+  confirmedCounts: Counts;
+  inferredCount: number;
+  weakCount: number;
+  unknownOriginCount: number;
+  inventory: InventorySnapshot | null;
+  inventoryState: InventoryState;
+  inventoryLastContact: string | null;
+  inventoryLastSuccess: string | null;
+  inventoryErrorCode: ErrorCode | null;
+  source: SourceInfo | null;
 }

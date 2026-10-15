@@ -169,7 +169,7 @@ class ContractTests(unittest.TestCase):
     def test_string_fields_enforce_type_and_length_boundaries(self):
         for field, limit in (("agent", 64), ("session_id", 128),
                              ("model", 128), ("effort", 128), ("permission_mode", 128)):
-            for value in ("", "x" * (limit + 1), [], 3, False):
+            for value in (("",) if field != "effort" else ()) + ("x" * (limit + 1), [], 3, False):
                 with self.subTest(field=field, value=value):
                     record = source_agent()
                     if field == "agent":

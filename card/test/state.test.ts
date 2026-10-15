@@ -25,6 +25,9 @@ describe('configuration boundary', () => {
   it.each([
     { title: 42 }, { title: null }, { title: '' }, { title: ' ' }, { title: 'x'.repeat(129) }, { title: '\ud800' },
     { appearance: 'native' }, { appearance: null }, { appearance: 1 },
+    { group_by: 'repository' }, { show_summary: 'true' }, { show_model: null }, { show_effort: 1 },
+    { show_session_id: 'false' }, { include_inferred: null }, { statuses: ['PRIVATE_STATUS'] }, { statuses: ['idle', 'idle'] },
+    { agent_types: [''] }, { agent_types: ['x'.repeat(65)] },
   ])('rejects invalid presentation settings %j', settings => {
     expect(() => validateConfig({ type: 'custom:ha-tty7-card', hosts: [host], ...settings })).toThrowError(Error);
   });

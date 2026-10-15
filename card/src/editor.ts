@@ -1,10 +1,14 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import type { CardConfig, HomeAssistant, HostConfig } from './contracts';
+import { STATUSES } from './contracts';
+import { localize } from './localize';
+import type { MessageKey } from './localize';
 import { discoverHosts } from './discovery';
 import { validateConfig } from './state';
 
 interface HostRow { id: number; host: HostConfig }
+type PresentationConfig = Omit<CardConfig, 'type' | 'hosts' | 'title' | 'appearance'>;
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -27,6 +31,11 @@ export class HaTty7CardEditor extends LitElement {
     button:disabled { cursor: default; opacity: .5; }
     a { color: var(--primary-color, #1f6bf0); display: inline-block; min-height: 44px; padding: 8px 0; }
     .feedback { color: var(--error-color, #b3261e); }
+    .display-options { display: grid; gap: 12px; }
+    .display-options label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+    .display-options select, textarea { min-width: 0; max-width: 100%; min-height: 44px; color: inherit; background: var(--card-background-color, #fff); font: inherit; font-size: 16px; padding: 8px; }
+    .display-options input { width: 44px; height: 44px; margin: 0; flex-shrink: 0; }
+    textarea { width: 100%; }
   `;
   private currentHass: HomeAssistant | undefined;
   private rows: HostRow[] = [];
@@ -34,6 +43,8 @@ export class HaTty7CardEditor extends LitElement {
   private feedback = '';
   private cardTitle = '';
   private appearance: CardConfig['appearance'];
+  private presentation: PresentationConfig = {};
+  private t(key: MessageKey): string { return localize(this.currentHass, key); }
 
   set hass(value: HomeAssistant | undefined) { this.currentHass = value; this.requestUpdate(); }
   get hass(): HomeAssistant | undefined { return this.currentHass; }
@@ -44,6 +55,14 @@ export class HaTty7CardEditor extends LitElement {
     const title = record(value) ? text(value.title, 128) : '';
     this.cardTitle = this.cardTitle.trim() === title ? this.cardTitle : title;
     this.appearance = record(value) && (value.appearance === 'tty7' || value.appearance === 'home-assistant') ? value.appearance : undefined;
+    const display: Record<string, unknown> = { type: 'custom:ha-tty7-card', hosts: [] };
+    if (record(value)) for (const key of ['group_by', 'show_summary', 'show_model', 'show_effort', 'show_session_id', 'statuses', 'agent_types', 'include_inferred']) {
+      if (Object.hasOwn(value, key)) display[key] = value[key];
+    }
+    try {
+      const { type: _type, hosts: _hosts, title: _title, appearance: _appearance, ...presentation } = validateConfig(display);
+      this.presentation = presentation;
+    } catch { this.presentation = {}; }
     const previousRows = this.rows;
     this.rows = hosts.filter(record).map((host, index) => {
       const previous = previousRows.find(row => row.host.roster_entity === host.roster_entity
@@ -67,9 +86,10 @@ export class HaTty7CardEditor extends LitElement {
         type: 'custom:ha-tty7-card', hosts: this.rows.map(row => row.host),
         ...(this.cardTitle.trim() ? { title: this.cardTitle } : {}),
         ...(this.appearance ? { appearance: this.appearance } : {}),
+        ...this.presentation,
       });
     } catch {
-      this.feedback = 'Use a title of at most 128 characters and choose a host pair with a unique, non-empty label for each row.';
+      this.feedback = this.t('editor_feedback');
       this.requestUpdate();
       return;
     }
@@ -112,6 +132,18 @@ export class HaTty7CardEditor extends LitElement {
     this.appearance = event.detail.value;
     this.publish();
   }
+  private presentationChanged(key: keyof PresentationConfig, value: unknown): void {
+    try {
+      const { type: _type, hosts: _hosts, ...presentation } = validateConfig({
+        type: 'custom:ha-tty7-card', hosts: [], ...this.presentation, [key]: value,
+      });
+      this.presentation = presentation;
+      this.publish();
+    } catch {
+      this.feedback = this.t('editor_feedback');
+      this.requestUpdate();
+    }
+  }
 
   private addRow(): void {
     if (this.rows.length >= 64) return;
@@ -131,17 +163,16 @@ export class HaTty7CardEditor extends LitElement {
   protected override render() {
     const hosts = discoverHosts(this.currentHass);
     return html`
-      <p>Choose HA-tty7 hosts and dashboard labels. Only status is shown; pairing credentials stay in integration settings.</p>
-      <ha-selector data-field="title" .hass=${this.currentHass} .label=${'Card title (default: tty7 agents)'}
+      <p>${this.t('editor_intro')}</p>
+      <ha-selector data-field="title" .hass=${this.currentHass} .label=${this.t('card_title')}
         .selector=${{ text: {} }} .value=${this.cardTitle}
         @value-changed=${this.titleChanged}></ha-selector>
-      <ha-selector data-field="appearance" .hass=${this.currentHass} .label=${'Appearance'}
+      <ha-selector data-field="appearance" .hass=${this.currentHass} .label=${this.t('appearance')}
         .selector=${{ select: { options: [{ value: 'tty7', label: 'tty7' }, { value: 'home-assistant', label: 'Home Assistant' }],
           mode: 'dropdown', custom_value: false } }} .value=${this.appearance ?? 'tty7'}
         @value-changed=${this.appearanceChanged}></ha-selector>
-      ${!hosts.length ? html`<p role="status">No configured HA-tty7 host pairs are available. Add a host in
-        <a href="/config/integrations">Settings · Devices & services</a>, then return to this editor.
-        Saved entity pairs remain unchanged.</p>` : nothing}
+      ${!hosts.length ? html`<p role="status">${this.t('missing_hosts')}
+        <a href="/config/integrations">${this.t('settings_link')}</a>, ${this.t('saved_pairs')}</p>` : nothing}
       ${repeat(this.rows, row => row.id, (row, index) => {
         const choices = hosts.filter(host => host.roster_entity === row.host.roster_entity
           || !this.rows.some(other => other !== row && other.host.roster_entity === host.roster_entity));
@@ -150,20 +181,39 @@ export class HaTty7CardEditor extends LitElement {
           options.push({ value: row.host.roster_entity, label: row.host.name || row.host.roster_entity });
         }
         return html`<fieldset data-row=${row.id}>
-          <legend>Host ${index + 1}</legend>
-          <ha-selector data-field="host" .hass=${this.currentHass} .label=${`HA-tty7 host ${index + 1}`}
+          <legend>${this.t('host')} ${index + 1}</legend>
+          <ha-selector data-field="host" .hass=${this.currentHass} .label=${`${this.t('host_picker')} ${index + 1}`}
             .selector=${{ select: { options, mode: 'dropdown', custom_value: false } }} .value=${row.host.roster_entity}
             @value-changed=${(event: CustomEvent<{ value: unknown }>) => this.selectHost(event, row.id)}></ha-selector>
-          <ha-selector data-field="name" .hass=${this.currentHass} .label=${`Dashboard label ${index + 1}`}
+          <ha-selector data-field="name" .hass=${this.currentHass} .label=${`${this.t('dashboard_label')} ${index + 1}`}
             .selector=${{ text: {} }} .value=${row.host.name}
             @value-changed=${(event: CustomEvent<{ value: unknown }>) => this.labelChanged(event, row.id)}></ha-selector>
-          ${row.host.roster_entity && row.host.connectivity_entity ? html`<p class="pair">Roster: ${row.host.roster_entity}<br>
-            Connectivity: ${row.host.connectivity_entity}</p>` : nothing}
-          <button type="button" data-action="remove" aria-label=${`Remove host ${index + 1}`} @click=${() => this.removeRow(row.id)}>Remove host</button>
+          ${row.host.roster_entity && row.host.connectivity_entity ? html`<p class="pair">${this.t('roster')}: ${row.host.roster_entity}<br>
+            ${this.t('connectivity')}: ${row.host.connectivity_entity}</p>` : nothing}
+          <button type="button" data-action="remove" aria-label=${`${this.t('remove_host')} ${index + 1}`} @click=${() => this.removeRow(row.id)}>${this.t('remove_host')}</button>
         </fieldset>`;
       })}
       ${this.feedback ? html`<p class="feedback" role="alert">${this.feedback}</p>` : nothing}
-      <button type="button" data-action="add" ?disabled=${this.rows.length >= 64} @click=${this.addRow}>Add host</button>
+      <button type="button" data-action="add" ?disabled=${this.rows.length >= 64} @click=${this.addRow}>${this.t('add_host')}</button>
+      <fieldset class="display-options"><legend>${this.t('group_by')}</legend>
+        <label>${this.t('group_by')}<select data-field="group_by" .value=${this.presentation.group_by ?? 'host'}
+          @change=${(event: Event) => this.presentationChanged('group_by', (event.target as HTMLSelectElement).value)}>
+          ${(['host', 'workspace', 'tab'] as const).map(group => html`<option value=${group}>${this.t(`group_${group}`)}</option>`)}
+        </select></label>
+        ${(['show_summary', 'show_model', 'show_effort', 'show_session_id', 'include_inferred'] as const).map(key => html`
+          <label><input type="checkbox" data-field=${key} .checked=${this.presentation[key] ?? key !== 'show_session_id'}
+            @change=${(event: Event) => this.presentationChanged(key, (event.target as HTMLInputElement).checked)}>${this.t(key)}</label>`)}
+        <fieldset><legend>${this.t('statuses')}</legend>${STATUSES.map(status => html`<label><input type="checkbox" data-status=${status}
+          .checked=${!this.presentation.statuses || this.presentation.statuses.includes(status)}
+          @change=${(event: Event) => {
+            const selected = this.presentation.statuses ?? [...STATUSES];
+            this.presentationChanged('statuses', (event.target as HTMLInputElement).checked ? [...selected, status] : selected.filter(item => item !== status));
+          }}>${this.t(status)}</label>`)}</fieldset>
+        <label for="agent-types">${this.t('agent_types')}</label>
+        <textarea id="agent-types" data-field="agent_types" aria-describedby="agent-types-help" .value=${this.presentation.agent_types?.join('\n') ?? ''}
+          @change=${(event: Event) => this.presentationChanged('agent_types', [...new Set((event.target as HTMLTextAreaElement).value.split('\n').map(value => value.trim()).filter(Boolean))])}></textarea>
+        <p id="agent-types-help">${this.t('agent_types_help')}</p>
+      </fieldset>
     `;
   }
 }

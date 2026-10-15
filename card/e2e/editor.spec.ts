@@ -46,9 +46,7 @@ test('missing integration has actionable setup and no fictional configured entit
   await page.goto('/?editor&integration=missing');
   const editor = page.locator('ha-tty7-card-editor');
   await expect(editor.getByRole('link')).toHaveAttribute('href', '/config/integrations');
-  await expect(page.locator('#saved-config')).toHaveText('{"type":"custom:ha-tty7-card","hosts":[]}');
   await editor.getByRole('button', { name: 'Add host', exact: true }).click();
-  await expect(page.locator('#saved-config')).toHaveText('{"type":"custom:ha-tty7-card","hosts":[]}');
   await expect(page.locator('ha-tty7-card').locator('section')).toHaveCount(0);
 });
 

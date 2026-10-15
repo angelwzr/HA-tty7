@@ -11,3 +11,16 @@ webhook_url_file = "webhook-url"
 # ca_file = "/etc/ssl/certs/homelab-ca.pem"
 poll_seconds = 2
 heartbeat_seconds = 15
+
+# Optional stock ws/tab/pane inventory. Off unless you explicitly opt in.
+collect_inventory = false
+# Explicit workspace/tab/pinned-group names may contain private information.
+# Requires collect_inventory = true.
+include_names = false
+# Derived tab labels may contain titles or directory basenames.
+# Requires include_names = true; full paths are never collected for export.
+include_derived_labels = false
+# Safe stock status diagnostics only: build, dialects and sampled server uptime.
+collect_source = true
+# Inventory/source sample on heartbeat cadence; cached inventory retains sample_id.
+# Heartbeat + poll + enabled CLI budgets + HTTP budget must fit 45s freshness.

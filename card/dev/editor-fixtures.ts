@@ -10,7 +10,8 @@ export function registryFixture(): HomeAssistant {
     devices[id] = { id, identifiers: [['ha_tty7', `synthetic-host-${index}`]], config_entries: [`entry-${index}`],
       name: host.name, name_by_user: null, disabled_by: null };
     for (const entityId of [host.roster_entity, host.connectivity_entity]) {
-      entities[entityId] = { entity_id: entityId, platform: 'ha_tty7', device_id: id };
+      entities[entityId] = { entity_id: entityId, platform: 'ha_tty7', device_id: id,
+        translation_key: entityId === host.roster_entity ? 'roster' : 'connectivity' };
     }
   }
   devices['unrelated-device'] = { id: 'unrelated-device', identifiers: [['other_integration', 'other-host']],

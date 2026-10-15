@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { HOSTILE } from '../dev/fixtures';
+import { HOSTILE, hostConfigs } from '../dev/fixtures';
 
 test('host isolation, keyboard expansion and identity updates', async ({ page }) => {
   await page.goto('/');
@@ -22,6 +22,42 @@ test('host isolation, keyboard expansion and identity updates', async ({ page })
   await page.keyboard.press('Space');
   await expect(row).toHaveAttribute('aria-expanded', 'true');
   await expect(row).toBeFocused();
+});
+
+test('structural inventory keeps detection tab-level and preserves metadata through local filters and locale updates', async ({ page }) => {
+  await page.goto('/?scenario=inventory');
+  await page.evaluate(async hosts => {
+    const card = document.querySelector('ha-tty7-card')!;
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts, group_by: 'tab', appearance: 'home-assistant' });
+    await card.updateComplete;
+  }, [hostConfigs[0]!]);
+  const card = page.locator('ha-tty7-card');
+  const split = card.locator('[data-tab="synthetic-tab-1"]');
+  await expect(split.locator('.group-head')).toContainText('ClaudeCode');
+  await expect(split.locator('.group-head')).toContainText('Waiting');
+  const detected = card.locator('[data-tab="synthetic-tab-2"]');
+  await expect(detected).toContainText('Unknown');
+  await expect(detected).toContainText('Hibernated');
+  await expect(detected.locator('[data-pane]')).toHaveCount(0);
+  const row = card.locator('[data-pane="1"]');
+  await row.focus(); await page.keyboard.press('Enter');
+  await expect(row).toHaveAttribute('aria-expanded', 'true');
+  await expect(row).toContainText('None applicable');
+  await page.evaluate(async hosts => {
+    const card = document.querySelector('ha-tty7-card')!;
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts, group_by: 'tab', statuses: ['waiting'] });
+    await card.updateComplete;
+  }, [hostConfigs[0]!]);
+  await expect(card.locator('.filtered-count')).toContainText('1 / 5');
+  await expect(card.locator('.summary')).toContainText('5 reported');
+  await page.evaluate(async hosts => {
+    const card = document.querySelector('ha-tty7-card')!;
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts, group_by: 'tab' });
+    card.hass = { ...card.hass!, locale: { language: 'ru', number_format: 'language', time_format: '24', date_format: 'DMY', first_weekday: 'language', time_zone: 'server' } };
+    await card.updateComplete;
+  }, [hostConfigs[0]!]);
+  await expect(row).toHaveAttribute('aria-expanded', 'true');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 

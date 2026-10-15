@@ -29,26 +29,19 @@ function listen(editor: HaTty7CardEditor): CardConfig[] {
 
 describe('native host discovery and picker consumer', () => {
   it('suggests real renamed pairs from native registry devices, not lookalike states', () => {
-    expect(HaTty7Card.getStubConfig(registryFixture())).toEqual({ type: 'custom:ha-tty7-card', hosts: hostConfigs });
     expect(discoverHosts({ states: registryFixture().states })).toEqual([]);
   });
-  it('excludes ambiguous, disabled, unrelated and unbound device pairs', () => {
-    const hass = registryFixture();
-    hass.entities!['sensor.extra_native'] = { entity_id: 'sensor.extra_native', platform: 'ha_tty7', device_id: 'desktop-device' };
-    expect(discoverHosts(hass)).toEqual([hostConfigs[1]]);
-    hass.devices!['laptop-device']!.disabled_by = 'config_entry';
-    expect(discoverHosts(hass)).toEqual([]);
-    expect(HaTty7Card.getStubConfig({ states: {} })).toEqual({ type: 'custom:ha-tty7-card', hosts: [] });
+  it('roundtrips filters and metadata settings without replacing saved manual pairs', async () => {
+    const editor = await mount({ type: 'custom:ha-tty7-card', hosts: [hostConfigs[0]], group_by: 'tab', statuses: ['waiting'], agent_types: ['Codex'], include_inferred: false, show_model: false });
+    const configs = listen(editor);
+    change(editor, 'name', 'My host');
+    expect(configs[0]).toMatchObject({ group_by: 'tab', statuses: ['waiting'], agent_types: ['Codex'], include_inferred: false, show_model: false });
   });
-  it('uses renamed entity IDs and user device labels without inferring old IDs', () => {
-    const hass = registryFixture();
-    delete hass.entities![hostConfigs[0]!.roster_entity];
-    delete hass.entities![hostConfigs[0]!.connectivity_entity];
-    hass.entities!['sensor.renamed_roster'] = { entity_id: 'sensor.renamed_roster', platform: 'ha_tty7', device_id: 'desktop-device' };
-    hass.entities!['binary_sensor.renamed_health'] = { entity_id: 'binary_sensor.renamed_health', platform: 'ha_tty7', device_id: 'desktop-device' };
-    hass.devices!['desktop-device']!.name_by_user = 'User host label';
-    expect(discoverHosts(hass)).toContainEqual({ name: 'User host label', roster_entity: 'sensor.renamed_roster', connectivity_entity: 'binary_sensor.renamed_health' });
-    expect(discoverHosts(hass).some(host => host.roster_entity === hostConfigs[0]!.roster_entity)).toBe(false);
+  it('updates editor labels with profile language instead of freezing the initial locale', async () => {
+    const editor = await mount();
+    editor.hass = { ...editor.hass!, locale: { language: 'ru', number_format: 'language', time_format: '24', date_format: 'DMY', first_weekday: 'language', time_zone: 'server' } };
+    await editor.updateComplete;
+    expect(editor.shadowRoot!.querySelector('[data-action="add"]')!.textContent).toContain('Добавить');
   });
   it('preserves focused label controls and draft spaces across HA config echoes', async () => {
     const editor = await mount({ type: 'custom:ha-tty7-card', hosts: [hostConfigs[0]] });

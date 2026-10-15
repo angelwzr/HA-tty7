@@ -1,5 +1,6 @@
 import { ERROR_CODES, STATUSES } from './contracts';
 import type { AgentRecord, AgentStatus, CardConfig, Counts, ErrorCode, HassStates, HostConfig, HostView } from './contracts';
+import { parseInventory, parseSource, origin } from './inventory';
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -25,9 +26,17 @@ export function validateConfig(value: unknown): CardConfig {
   const fail = () => { throw new Error('Configure unique host names, sensor rosters, and binary_sensor connectivity entities.'); };
   if (!object(value) || value.type !== 'custom:ha-tty7-card' || !Array.isArray(value.hosts)
     || value.hosts.length > 64
-    || Object.keys(value).some(key => !['type', 'hosts', 'title', 'appearance'].includes(key))) return fail();
+    || Object.keys(value).some(key => !['type', 'hosts', 'title', 'appearance', 'group_by', 'show_summary', 'show_model', 'show_effort', 'show_session_id', 'statuses', 'agent_types', 'include_inferred'].includes(key))) return fail();
   if (Object.hasOwn(value, 'title') && (!boundedString(value.title, 128) || !value.title.trim())) return fail();
   if (Object.hasOwn(value, 'appearance') && !['tty7', 'home-assistant'].includes(value.appearance as string)) return fail();
+  if (Object.hasOwn(value, 'group_by') && !['host', 'workspace', 'tab'].includes(value.group_by as string)) return fail();
+  for (const key of ['show_summary', 'show_model', 'show_effort', 'show_session_id', 'include_inferred']) {
+    if (Object.hasOwn(value, key) && typeof value[key] !== 'boolean') return fail();
+  }
+  if (Object.hasOwn(value, 'statuses') && (!Array.isArray(value.statuses) || value.statuses.length > 5
+    || value.statuses.some(status => !STATUSES.includes(status as AgentStatus)) || new Set(value.statuses).size !== value.statuses.length)) return fail();
+  if (Object.hasOwn(value, 'agent_types') && (!Array.isArray(value.agent_types) || value.agent_types.length > 256
+    || value.agent_types.some(agent => !boundedString(agent, 64)) || new Set(value.agent_types).size !== value.agent_types.length)) return fail();
   const names = new Set<string>();
   const entities = new Set<string>();
   const hosts: HostConfig[] = [];
@@ -45,13 +54,23 @@ export function validateConfig(value: unknown): CardConfig {
     type: 'custom:ha-tty7-card', hosts,
     ...(Object.hasOwn(value, 'title') ? { title: (value.title as string).trim() } : {}),
     ...(Object.hasOwn(value, 'appearance') ? { appearance: value.appearance as CardConfig['appearance'] & string } : {}),
+    ...(Object.hasOwn(value, 'group_by') ? { group_by: value.group_by as NonNullable<CardConfig['group_by']> } : {}),
+    ...(Object.hasOwn(value, 'show_summary') ? { show_summary: value.show_summary as boolean } : {}),
+    ...(Object.hasOwn(value, 'show_model') ? { show_model: value.show_model as boolean } : {}),
+    ...(Object.hasOwn(value, 'show_effort') ? { show_effort: value.show_effort as boolean } : {}),
+    ...(Object.hasOwn(value, 'show_session_id') ? { show_session_id: value.show_session_id as boolean } : {}),
+    ...(Object.hasOwn(value, 'include_inferred') ? { include_inferred: value.include_inferred as boolean } : {}),
+    ...(Object.hasOwn(value, 'statuses') ? { statuses: [...value.statuses as AgentStatus[]] } : {}),
+    ...(Object.hasOwn(value, 'agent_types') ? { agent_types: [...value.agent_types as string[]] } : {}),
   };
 }
 
 function parseAgent(value: unknown): AgentRecord | null {
   if (!object(value) || !safeNumber(value.pane_id) || value.pane_id === 0 || !boundedString(value.agent, 64)) return null;
   if (Object.hasOwn(value, 'inferred') && typeof value.inferred !== 'boolean') return null;
+  if (Object.hasOwn(value, 'rich') && typeof value.rich !== 'boolean') return null;
   for (const key of ['session_id', 'model', 'effort', 'permission_mode']) {
+    if (key === 'effort' && value[key] === '') continue;
     if (value[key] !== undefined && value[key] !== null && !boundedString(value[key], 128)) return null;
   }
   for (const key of ['activity', 'turns']) {
@@ -64,6 +83,7 @@ function parseAgent(value: unknown): AgentRecord | null {
     session_id: (value.session_id as string | null | undefined) ?? null,
     status: STATUSES.includes(value.status as AgentStatus) ? value.status as AgentStatus : 'unknown',
     ...(value.inferred === true ? { inferred: true } : {}),
+    ...(typeof value.rich === 'boolean' ? { rich: value.rich } : {}),
     activity: (value.activity as number | null | undefined) ?? null,
     turns: (value.turns as number | null | undefined) ?? null,
     model: (value.model as string | null | undefined) ?? null,
@@ -81,7 +101,10 @@ function timestamp(value: unknown): number | null {
 export function deriveHostView(config: HostConfig, states: HassStates, connected: boolean): HostView {
   const counts: Counts = { idle: 0, working: 0, waiting: 0, done: 0, unknown: 0 };
   const result: HostView = { config, state: connected ? 'loading' : 'disconnected', agents: [], counts,
-    lastContact: null, lastSuccess: null, errorCode: null, lastKnown: true };
+    lastContact: null, lastSuccess: null, errorCode: null, lastKnown: true,
+    confirmedCounts: { idle: 0, working: 0, waiting: 0, done: 0, unknown: 0 },
+    inferredCount: 0, weakCount: 0, unknownOriginCount: 0, inventory: null, inventoryState: 'disabled',
+    inventoryLastContact: null, inventoryLastSuccess: null, inventoryErrorCode: null, source: null };
   const roster = states[config.roster_entity];
   const connectivity = states[config.connectivity_entity];
   if (!roster || !connectivity) return result;
@@ -111,6 +134,21 @@ export function deriveHostView(config: HostConfig, states: HassStates, connected
   const reportedCounts = attrs.counts;
   if (STATUSES.some(status => !safeNumber(reportedCounts[status]) || reportedCounts[status] !== counts[status])) return result;
   result.agents = agents.map(agent => ({ ...agent, identity: JSON.stringify([config.roster_entity, agent.session_id, agent.pane_id]) }));
+  for (const agent of agents) {
+    const reportOrigin = origin(agent);
+    if (reportOrigin === 'structured_hook') result.confirmedCounts[agent.status]++;
+    else if (reportOrigin === 'inferred') result.inferredCount++;
+    else if (reportOrigin === 'weak_report') result.weakCount++;
+    else result.unknownOriginCount++;
+  }
+  result.inventoryState = ['disabled', 'unconfirmed', 'healthy', 'error', 'stale'].includes(attrs.inventory_state as string)
+    ? attrs.inventory_state as HostView['inventoryState'] : attrs.inventory === undefined ? 'disabled' : 'unconfirmed';
+  if (result.inventoryState !== 'disabled') result.inventory = parseInventory(attrs.inventory);
+  if (!result.inventory && result.inventoryState === 'healthy') result.inventoryState = 'unconfirmed';
+  result.source = parseSource(attrs.source);
+  result.inventoryLastContact = typeof attrs.inventory_last_contact === 'string' && Number.isFinite(timestamp(attrs.inventory_last_contact)) ? attrs.inventory_last_contact : null;
+  result.inventoryLastSuccess = typeof attrs.inventory_last_success === 'string' && Number.isFinite(timestamp(attrs.inventory_last_success)) ? attrs.inventory_last_success : null;
+  result.inventoryErrorCode = ERROR_CODES.includes(attrs.inventory_error_code as ErrorCode) ? attrs.inventory_error_code as ErrorCode : null;
   result.lastContact = attrs.last_contact as string | null;
   result.lastSuccess = attrs.last_success as string | null;
   result.errorCode = attrs.error_code as ErrorCode | null;

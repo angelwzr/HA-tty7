@@ -10,8 +10,8 @@ export function discoverHosts(hass: HomeAssistant | undefined): HostConfig[] {
     if (!device || device.disabled_by || !device.config_entries.length
       || !device.identifiers.some(([domain, hostId]) => domain === 'ha_tty7' && hostId.length > 0)) continue;
     const pair = pairs.get(device.id) ?? { rosters: [], connectivity: [] };
-    if (/^sensor\.[a-z0-9_]+$/.test(entity.entity_id)) pair.rosters.push(entity.entity_id);
-    else if (/^binary_sensor\.[a-z0-9_]+$/.test(entity.entity_id)) pair.connectivity.push(entity.entity_id);
+    if (entity.translation_key === 'roster' && /^sensor\.[a-z0-9_]+$/.test(entity.entity_id)) pair.rosters.push(entity.entity_id);
+    else if (entity.translation_key === 'connectivity' && /^binary_sensor\.[a-z0-9_]+$/.test(entity.entity_id)) pair.connectivity.push(entity.entity_id);
     else continue;
     pairs.set(device.id, pair);
   }

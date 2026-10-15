@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import HostRuntime
 from .const import CONF_HOST_ID, CONF_LABEL, DOMAIN, VERSION
 
-DESCRIPTION = BinarySensorEntityDescription(key="connectivity", name="Connectivity",
+DESCRIPTION = BinarySensorEntityDescription(key="connectivity", translation_key="connectivity",
                                             device_class=BinarySensorDeviceClass.CONNECTIVITY)
 
 

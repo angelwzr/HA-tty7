@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
 from .const import (CONF_BASE_URL, CONF_COMPLETION, CONF_DASHBOARD, CONF_HOST_ID,
-                    CONF_LABEL, CONF_NOTIFY, CONF_WAITING, CONF_WEBHOOK_ID,
+                    CONF_LABEL, CONF_NOTIFY, CONF_RETAIN_INVENTORY, CONF_WAITING, CONF_WEBHOOK_ID,
                     DEFAULT_OPTIONS, DOMAIN)
 from .log_redaction import install_redactor
 
@@ -61,7 +61,7 @@ def _errors(hass: HomeAssistant, data: dict[str, Any], *, user: bool) -> dict[st
         errors[CONF_NOTIFY] = "invalid_destination"
     if not valid_dashboard(data.get(CONF_DASHBOARD)):
         errors[CONF_DASHBOARD] = "invalid_dashboard"
-    for key in (CONF_WAITING, CONF_COMPLETION):
+    for key in (CONF_WAITING, CONF_COMPLETION, CONF_RETAIN_INVENTORY):
         if type(data.get(key)) is not bool:
             errors[key] = "invalid_toggle"
     return errors
@@ -77,6 +77,7 @@ def _schema(hass: HomeAssistant, defaults: dict[str, Any], *, user: bool) -> pro
         selector.SelectSelectorConfig(options=supported_destinations(hass), mode=selector.SelectSelectorMode.DROPDOWN))
     for key in (CONF_WAITING, CONF_COMPLETION):
         fields[probatio.Required(key, default=defaults.get(key, True))] = selector.BooleanSelector()
+    fields[probatio.Required(CONF_RETAIN_INVENTORY, default=defaults.get(CONF_RETAIN_INVENTORY, False))] = selector.BooleanSelector()
     return probatio.Schema(fields)
 
 
@@ -149,6 +150,9 @@ class HATty7OptionsFlow(config_entries.OptionsFlow):
             # options manager's following equal-options write is a no-op.
             self.hass.config_entries.async_update_entry(self.config_entry, data=self._data,
                                                        title=self._data[CONF_LABEL], options=self._options)
+            if self._options[CONF_RETAIN_INVENTORY] is False:
+                from . import async_scrub_inventory_storage
+                await async_scrub_inventory_storage(self.hass, self.config_entry)
             return self.async_create_entry(title="", data=self._options)
         return self.async_show_form(step_id="pairing", data_schema=probatio.Schema({}),
                                     description_placeholders=_pairing(self._data), last_step=True)

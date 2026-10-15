@@ -13,9 +13,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import (CONF_COMPLETION, CONF_HOST_ID, CONF_LABEL, CONF_NOTIFY, CONF_WAITING,
+from .const import (CONF_COMPLETION, CONF_HOST_ID, CONF_LABEL, CONF_NOTIFY, CONF_RETAIN_INVENTORY, CONF_WAITING,
                     CONF_WEBHOOK_ID, DEFAULT_OPTIONS, DOMAIN, MODULE_URL, PLATFORMS, STATIC_URL)
 from .controller import HostController, notification_payload
 from .protocol import MAX_BODY_BYTES, PayloadError, decode_report
@@ -33,11 +34,30 @@ class HostRuntime:
         self.cancel_timer: Any = None
         self.closed = False
         self.lock = asyncio.Lock()
+        self.store = Store[dict[str, Any]](hass, 1, f"{DOMAIN}.{entry.entry_id}", private=True, atomic_writes=True)
+
+    @callback
+    def storage_data(self) -> dict[str, Any]:
+        return self.controller.restore_attributes(
+            retain_inventory=self.entry.options.get(CONF_RETAIN_INVENTORY, False) is True)
+
+    async def async_restore(self) -> None:
+        if (data := await self.store.async_load()) is not None:
+            self.controller.restore(data, retain_inventory=self.entry.options.get(CONF_RETAIN_INVENTORY, False) is True)
+            # Scrub prior opt-in data before accepting reports, including when
+            # the source is offline and therefore cannot send another snapshot.
+            if self.entry.options.get(CONF_RETAIN_INVENTORY, False) is not True:
+                await self.store.async_save(self.storage_data())
+
+    async def async_save(self) -> None:
+        await self.store.async_save(self.storage_data())
 
     @callback
     def publish(self) -> None:
         for listener in tuple(self.listeners):
             listener()
+        if not self.closed:
+            self.store.async_delay_save(self.storage_data, 15)
 
     @callback
     def subscribe(self, listener: Any) -> Any:
@@ -76,7 +96,7 @@ class HostRuntime:
             if self.closed:
                 return web.Response(status=410)
             events = self.controller.accept(report, dt_util.utcnow())
-            # Both native entities are synchronously written before any action.
+            # Native entities are synchronously written before any action.
             self.publish()
             for event in events:
                 await self.notify(event)
@@ -147,9 +167,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         install_redactor().remember(entry.data[CONF_WEBHOOK_ID])
     except ValueError:
         raise ConfigEntryNotReady("credential_redaction_capacity") from None
-    await _setup_frontend(hass, entry.entry_id)
     runtime = HostRuntime(hass, entry)
+    await runtime.async_restore()
     entry.runtime_data = runtime
+    await _setup_frontend(hass, entry.entry_id)
     webhook.async_register(hass, DOMAIN, "HA-tty7 host", entry.data[CONF_WEBHOOK_ID],
                            runtime.handle_webhook, local_only=True, allowed_methods=("POST",))
     try:
@@ -165,6 +186,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    if (runtime := getattr(entry, "runtime_data", None)) is not None:
+        await runtime.async_save()
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -175,6 +198,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if runtime.cancel_timer is not None:
         runtime.cancel_timer()
         runtime.cancel_timer = None
+    async with runtime.lock:
+        await runtime.async_save()
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         runtime.closed = False
         webhook.async_register(hass, DOMAIN, "HA-tty7 host", entry.data[CONF_WEBHOOK_ID],
@@ -185,6 +210,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def async_scrub_inventory_storage(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Revoke restore consent even for an unloaded or disabled source entry."""
+    if (runtime := getattr(entry, "runtime_data", None)) is not None and not runtime.closed:
+        await runtime.store.async_save(runtime.controller.restore_attributes(retain_inventory=False))
+        return
+    store = Store[dict[str, Any]](hass, 1, f"{DOMAIN}.{entry.entry_id}", private=True, atomic_writes=True)
+    if (data := await store.async_load()) is not None:
+        controller = HostController(entry.data[CONF_HOST_ID])
+        controller.restore(data)
+        await store.async_save(controller.restore_attributes())
+
+
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Revocation is immediate even if an entry was not currently loaded."""
     webhook.async_unregister(hass, entry.data[CONF_WEBHOOK_ID])
@@ -193,4 +230,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if runtime.cancel_timer is not None:
             runtime.cancel_timer()
             runtime.cancel_timer = None
+        await runtime.store.async_remove()
+    else:
+        await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}", private=True, atomic_writes=True).async_remove()
     await _release_frontend(hass, entry.entry_id)
