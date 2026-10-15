@@ -18,10 +18,11 @@ _MAX_RECORD_BYTES = 4096
 _MAX_DIRECTORY_ENTRIES = 1024
 _FRESH_MS = 10_000
 _PRUNE_MS = 60_000
-_FIELDS = frozenset({
+_REQUIRED_FIELDS = frozenset({
     "schema_version", "reporter_id", "pane_id", "session_id", "updated_at_ms",
     "status", "run_id", "background_jobs", "health",
 })
+_FIELDS = _REQUIRED_FIELDS | {"model", "effort"}
 _STATUSES = frozenset({"idle", "working", "waiting", "done", "unknown"})
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -36,6 +37,8 @@ class _NativeRecord:
     run_id: str | None
     background_jobs: int
     health: str
+    model: str | None
+    effort: str | None
 
 
 def _integer(value: object, *, positive: bool = False) -> int:
@@ -51,6 +54,15 @@ def _identifier(value: object) -> str:
     return value
 
 
+def _metadata(value: object) -> str | None:
+    if value is None:
+        return None
+    text = _identifier(value)
+    if not text.strip():
+        raise ValueError("invalid native record")
+    return text
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict:
     result: dict = {}
     for key, value in pairs:
@@ -62,7 +74,7 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict:
 
 def _parse(body: bytes, reporter_id: str) -> _NativeRecord:
     data = json.loads(body.decode("utf-8"), object_pairs_hook=_unique_object)
-    if (not isinstance(data, dict) or data.keys() != _FIELDS
+    if (not isinstance(data, dict) or not _REQUIRED_FIELDS <= data.keys() <= _FIELDS
             or type(data["schema_version"]) is not int or data["schema_version"] != 1
             or data["reporter_id"] != reporter_id):
         raise ValueError("invalid native record")
@@ -79,6 +91,8 @@ def _parse(body: bytes, reporter_id: str) -> _NativeRecord:
         run_id=None if data["run_id"] is None else _identifier(data["run_id"]),
         background_jobs=_integer(data["background_jobs"]),
         health=health,
+        model=_metadata(data.get("model")),
+        effort=_metadata(data.get("effort")),
     )
 
 
@@ -207,12 +221,14 @@ def _load(directory: Path, now_ms: int | None) -> tuple[OmpState, dict[int, list
 
 def _overlay(row: AgentRecord, state: OmpState, native: _NativeRecord | None) -> AgentRecord:
     result = row.copy()
-    # Stock sessions/status/counters can belong to a child and are never a fallback.
+    # Stock sessions/status/counters/metadata can belong to a child, never a fallback.
     result.pop("inferred", None)
-    result.update(session_id=None, status="unknown", activity=None, turns=None, rich=False)
+    result.update(session_id=None, status="unknown", activity=None, turns=None,
+                  model=None, effort=None, rich=False)
     result["omp"] = OmpStatus(state=state, run_id=None, background_jobs=None)
     if state == "ready" and native is not None:
-        result.update(session_id=native.session_id, status=native.status, rich=True)
+        result.update(session_id=native.session_id, status=native.status,
+                      model=native.model, effort=native.effort, rich=True)
         result["omp"] = OmpStatus(state="ready", run_id=native.run_id,
                                   background_jobs=native.background_jobs)
     return result

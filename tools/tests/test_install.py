@@ -22,10 +22,10 @@ class InstallerTests(unittest.TestCase):
         self.home = Path(self.temporary.name)
         self.paths = self.installer.Paths(self.home)
 
-    def wheel(self, version="0.4.2", name="ha-tty7"):
-        wheel = self.home / "ha_tty7-0.4.2-py3-none-any.whl"
+    def wheel(self, version="0.4.3", name="ha-tty7"):
+        wheel = self.home / "ha_tty7-0.4.3-py3-none-any.whl"
         with zipfile.ZipFile(wheel, "w") as archive:
-            archive.writestr("ha_tty7-0.4.2.dist-info/METADATA",
+            archive.writestr("ha_tty7-0.4.3.dist-info/METADATA",
                              f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
         return wheel
 
@@ -82,7 +82,7 @@ class InstallerTests(unittest.TestCase):
                 self.installer.private_read(self.paths.url)
 
     def test_wrong_distribution_or_release_fails_before_install(self):
-        for version, name in (("0.4.0", "ha-tty7"), ("0.4.2", "other-package")):
+        for version, name in (("0.4.0", "ha-tty7"), ("0.4.3", "other-package")):
             with self.subTest(version=version, name=name):
                 with self.assertRaises(self.installer.InstallError):
                     self.installer.validate_wheel(self.wheel(version, name))

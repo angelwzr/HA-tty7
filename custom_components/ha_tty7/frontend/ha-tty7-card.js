@@ -605,11 +605,11 @@ const Tt = (e, t, s) => {
     else if (a[d] === o[y]) l[y] = k(n[d], r[y]), N(e, l[y + 1], n[d]), d++, y--;
     else if (a[f] === o[u]) l[u] = k(n[f], r[u]), N(e, n[d], n[f]), f--, u++;
     else if (c === void 0 && (c = Tt(o, u, y), _ = Tt(a, d, f)), c.has(a[d])) if (c.has(a[f])) {
-      const m = _.get(o[u]), $ = m !== void 0 ? n[m] : null;
-      if ($ === null) {
-        const b = N(e, n[d]);
-        k(b, r[u]), l[u] = b;
-      } else l[u] = k($, r[u]), N(e, n[d], $), n[m] = null;
+      const m = _.get(o[u]), b = m !== void 0 ? n[m] : null;
+      if (b === null) {
+        const $ = N(e, n[d]);
+        k($, r[u]), l[u] = $;
+      } else l[u] = k(b, r[u]), N(e, n[d], b), n[m] = null;
       u++;
     } else lt(n[f]), f--;
     else lt(n[d]), d++;
@@ -985,8 +985,8 @@ function G(e, t) {
   if (i === "language" || i === "system")
     c = z.date.format(l);
   else {
-    const _ = z.date.formatToParts(l), d = _.find((w) => w.type === "day").value, f = _.find((w) => w.type === "month").value, u = _.find((w) => w.type === "year").value, y = _.find((w) => w.type === "literal")?.value ?? "", m = _.at(-1), $ = m?.type === "literal" && !(s === "bg" && i === "YMD") ? m.value : "";
-    c = (i === "DMY" ? [d, f, u] : i === "MDY" ? [f, d, u] : [u, f, d]).join(y) + $;
+    const _ = z.date.formatToParts(l), d = _.find((w) => w.type === "day").value, f = _.find((w) => w.type === "month").value, u = _.find((w) => w.type === "year").value, y = _.find((w) => w.type === "literal")?.value ?? "", m = _.at(-1), b = m?.type === "literal" && !(s === "bg" && i === "YMD") ? m.value : "";
+    c = (i === "DMY" ? [d, f, u] : i === "MDY" ? [f, d, u] : [u, f, d]).join(y) + b;
   }
   return `${c}, ${z.time.format(l)}`;
 }
@@ -1037,7 +1037,6 @@ const Te = {
   omp_unsupported: "Unsupported",
   not_reported: "Not reported",
   none_applicable: "None applicable",
-  capability_unknown: "Capability unknown",
   agent: "Agent",
   status: "Status",
   pane: "Pane",
@@ -1172,7 +1171,6 @@ const Te = {
   omp_unsupported: "не поддерживается",
   not_reported: "Не сообщается",
   none_applicable: "Не применяется",
-  capability_unknown: "Поддержка неизвестна",
   agent: "Агент",
   status: "Статус",
   pane: "Панель",
@@ -1509,11 +1507,11 @@ class je extends T {
     this.expanded.has(t) ? this.expanded.delete(t) : this.expanded.add(t), this.requestUpdate();
   }
   renderAgent(t, s) {
-    const i = this.expanded.has(t.identity), n = `${this.t(t.status)}${t.inferred === !0 ? ` (${this.t("inferred")})` : ""}`, r = X(s.inventory, t.pane_id), o = s.inventory?.panes.find((b) => b.pane_id === t.pane_id), a = r?.name ?? r?.label ?? t.agent, l = t.model ?? this.t("not_reported"), c = t.effort === "" ? this.t("none_applicable") : t.effort ?? this.t("not_reported"), _ = this.config?.show_model === !0 && t.model !== null && t.model.trim().length > 0, d = this.config?.show_effort === !0 && t.effort !== null && (t.effort === "" || t.effort.trim().length > 0), f = this.config?.show_session_id === !0 && !!t.session_id?.trim(), u = [
+    const i = this.expanded.has(t.identity), n = `${this.t(t.status)}${t.inferred === !0 ? ` (${this.t("inferred")})` : ""}`, r = X(s.inventory, t.pane_id), o = s.inventory?.panes.find(($) => $.pane_id === t.pane_id), a = r?.name ?? r?.label ?? t.agent, l = t.model ?? this.t("not_reported"), c = t.effort === "" ? this.t("none_applicable") : t.effort ?? this.t("not_reported"), _ = this.config?.show_model === !0 && t.model !== null && t.model.trim().length > 0, d = this.config?.show_effort === !0 && t.effort !== null && (t.effort === "" || t.effort.trim().length > 0), f = this.config?.show_session_id === !0 && !!t.session_id?.trim(), u = [
       this.config?.show_agent_type && a !== t.agent ? t.agent : null,
       this.config?.show_pane_id ? `${this.t("pane")} ${t.pane_id}` : null,
       f ? t.session_id : null
-    ].filter((b) => b !== null), y = `details-${Array.from(t.identity, (b) => b.codePointAt(0).toString(16)).join("-")}`, m = Vt(t), $ = [
+    ].filter(($) => $ !== null), y = `details-${Array.from(t.identity, ($) => $.codePointAt(0).toString(16)).join("-")}`, m = Vt(t), b = [
       [this.t("agent"), t.agent],
       [this.t("status"), n],
       [this.t("pane"), t.pane_id],
@@ -1525,10 +1523,10 @@ class je extends T {
       [this.t("effort"), c],
       [this.t("permission"), t.permission_mode]
     ];
-    return t.omp && $.push(
+    return t.omp && b.push(
       [this.t("omp_status"), this.t(`omp_${t.omp.state}`)],
       [this.t("background_jobs"), t.omp.background_jobs]
-    ), (t.model === null || t.effort === null) && $.push([this.t("model"), this.t("capability_unknown")]), r && $.push([this.t("workspace"), r.workspace_id], [this.t("tab"), r.tab_id]), o && $.push(
+    ), r && b.push([this.t("workspace"), r.workspace_id], [this.t("tab"), r.tab_id]), o && b.push(
       [this.t("live"), o.live === null ? this.t("not_reported") : this.t(o.live ? "live" : "not_live")],
       [this.t("hibernated"), this.t(o.hibernated ? "yes" : "no")],
       [this.t("orphan"), this.t(o.orphan ? "yes" : "no")]
@@ -1546,7 +1544,7 @@ class je extends T {
         <span class="status" data-status=${t.status}><span class="dot" aria-hidden="true"></span>${n}</span>
         <span class="chevron" aria-hidden="true">${i ? "⌄" : "›"}</span>
       </button>
-      <dl id=${y} ?hidden=${!i}>${i ? $.map(([b, w]) => p`<dt>${b}</dt><dd>${w ?? this.t("not_reported")}</dd>`) : h}</dl>
+      <dl id=${y} ?hidden=${!i}>${i ? b.map(([$, w]) => p`<dt>${$}</dt><dd>${w ?? this.t("not_reported")}</dd>`) : h}</dl>
     </li>`;
   }
   tabVisible(t) {

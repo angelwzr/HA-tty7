@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 
 type Status = "idle" | "working" | "waiting" | "done" | "unknown";
 type Event = { type?: string; willContinue?: boolean; willRetry?: boolean; aborted?: boolean; success?: boolean; toolCallId?: string; toolName?: string; sessionId?: string };
-type PublicContext = Pick<ExtensionContext, "agent"> & Partial<Pick<ExtensionContext, "isIdle" | "hasPendingMessages" | "getAsyncJobSnapshot">> & { sessionId: () => string };
+type PublicContext = Pick<ExtensionContext, "agent"> & Partial<Pick<ExtensionContext, "model" | "isIdle" | "hasPendingMessages" | "getAsyncJobSnapshot">> & { sessionId: () => string };
 interface NativeRecord {
   schema_version: 1;
   reporter_id: string;
@@ -19,10 +19,23 @@ interface NativeRecord {
   run_id: string | null;
   background_jobs: number;
   health: "ready" | "unsupported";
+  model?: string | null;
+  effort?: string | null;
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const uid = () => process.getuid!();
 const safeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+function metadataScalar(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 256 || !value.trim()) return false;
+  let count = 0;
+  for (let index = 0; index < value.length; index++) {
+    const point = value.codePointAt(index)!;
+    if (++count > 128 || (point >= 0xd800 && point <= 0xdfff)) return false;
+    if (point > 0xffff) index++;
+  }
+  return true;
+}
 
 function withPublicationLock(directory: string, mode: "--shared" | "--exclusive", mutation: () => void): void {
   // Persistent inode shared with the collector. Every operation opens a new OFD.
@@ -75,13 +88,15 @@ function generatedRecord(record: unknown, id: string): record is NativeRecord {
       !("schema_version" in record) || !("reporter_id" in record) || !("pane_id" in record) ||
       !("session_id" in record) || !("updated_at_ms" in record) || !("status" in record) ||
       !("run_id" in record) || !("background_jobs" in record) || !("health" in record)) return false;
-  return Object.keys(record).length === 9 &&
+  return Object.keys(record).length === 9 + ("model" in record ? 1 : 0) + ("effort" in record ? 1 : 0) &&
     record.schema_version === 1 && record.reporter_id === id &&
     safeInteger(record.pane_id) && record.pane_id > 0 &&
     typeof record.session_id === "string" && record.session_id.length > 0 && record.session_id.length <= 128 &&
     safeInteger(record.updated_at_ms) && safeInteger(record.background_jobs) &&
     typeof record.status === "string" && ["idle", "working", "waiting", "done", "unknown"].includes(record.status) &&
     (record.health === "ready" || record.health === "unsupported") &&
+    (!("model" in record) || record.model === null || metadataScalar(record.model)) &&
+    (!("effort" in record) || record.effort === null || metadataScalar(record.effort)) &&
     (record.run_id === null || (typeof record.run_id === "string" && record.run_id.length > 0 && record.run_id.length <= 128));
 }
 
@@ -181,10 +196,28 @@ export default function haTty7Status(pi: ExtensionAPI): void {
       }
       health = "ready";
     } catch { jobs = 0; }
+    let model: string | null = null;
+    let effort: string | null = null;
+    try {
+      const current = context.model;
+      if (current) {
+        const provider = current.provider;
+        const id = current.id;
+        if (metadataScalar(provider) && metadataScalar(id)) {
+          const identity = `${provider}/${id}`;
+          if (metadataScalar(identity)) model = identity;
+        }
+      }
+    } catch { /* Metadata must not alter lifecycle health or run identity. */ }
+    try {
+      const current = pi.getThinkingLevel();
+      if (metadataScalar(current)) effort = current;
+    } catch { /* Independent optional public metadata. */ }
     const record = {
       schema_version: 1, reporter_id: reporter.id, pane_id: reporter.pane,
       session_id: reporter.session, updated_at_ms: Date.now(), status,
       run_id: health === "ready" ? run : null, background_jobs: jobs, health,
+      model, effort,
     };
     try {
       const owner = reporter;
@@ -237,6 +270,7 @@ export default function haTty7Status(pi: ExtensionAPI): void {
     // Cache only the scalar-observation facade, never event args/results/messages.
     context = {
       agent: ctx.agent,
+      get model() { return ctx.model; },
       sessionId: () => ctx.sessionManager.getSessionId(),
       isIdle: typeof ctx.isIdle === "function" ? ctx.isIdle.bind(ctx) : undefined,
       hasPendingMessages: typeof ctx.hasPendingMessages === "function" ? ctx.hasPendingMessages.bind(ctx) : undefined,

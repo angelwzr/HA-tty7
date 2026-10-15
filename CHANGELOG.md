@@ -4,6 +4,28 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-15
+
+### Fixed
+
+- Default native OMP reporting now includes the main session's selected provider/model ID and thinking level instead of depending on tty7's empty OMP readout.
+- Model and thinking-only changes refresh on the existing heartbeat without resetting status, main identity, run deduplication or notification baselines.
+- Native null/unavailable metadata no longer falls back to child-polluted tty7 values.
+- Removed the duplicate Model/Capability unknown detail row; partial metadata keeps the known model and honestly marks only the missing thinking level.
+- Installer messages now correctly require `/restart` after work finishes to load updated OMP extensions.
+
+### Security
+
+- Only bounded nullable model/thinking strings are exported. Raw model objects, credentials, endpoints, messages and tool data stay excluded.
+- Metadata getter failures do not disable otherwise healthy native status. Existing source validation, private files, publication locks and freshness protections remain intact.
+
+### Upgrade requirements
+
+- Update HA first, then run the 0.4.3 host installer. Existing OMP sessions need `/restart` after foreground/background work finishes to load the richer reporter.
+- Older native status-only records remain readable with null model/thinking values. No extra source opt-in is needed; collapsed model/effort display flags remain off unless selected.
+- Permission mode and activity/turn counts are not fabricated; unsupported values remain unavailable.
+
+
 ## [0.4.2] - 2026-10-15
 
 ### Added
@@ -132,7 +154,8 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 - Bundled card, visual editor and automatic frontend loading.
 - Host-bound HTTPS ingestion, freshness handling, restoration and optional notifications.
 
-[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/angelwzr/HA-tty7/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/angelwzr/HA-tty7/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/angelwzr/HA-tty7/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/angelwzr/HA-tty7/compare/v0.3.0...v0.4.0

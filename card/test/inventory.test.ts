@@ -185,7 +185,7 @@ describe('stock inventory card contract', () => {
     const card = await mount({ show_effort: true, show_summary: true }); const row = card.shadowRoot!.querySelector<HTMLButtonElement>('[data-pane="1"]')!;
     expect(row.textContent).toContain('None applicable');
     row.click(); await card.updateComplete;
-    expect(card.shadowRoot!.textContent).toContain('Structured hook'); expect(card.shadowRoot!.textContent).toContain('Capability unknown');
+    expect(card.shadowRoot!.textContent).toContain('Structured hook');
     expect(card.shadowRoot!.textContent).not.toContain('Unsupported');
     expect(card.shadowRoot!.querySelector('.summary')!.textContent).toContain('1 confirmed');
   });

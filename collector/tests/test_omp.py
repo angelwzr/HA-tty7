@@ -27,7 +27,7 @@ def stock(pane=7, agent="OhMyPi"):
         "pane_id": pane, "agent": agent,
         "state": {"session_id": "polluted-child", "status": "done", "activity": 4,
                   "turns": 9, "inferred": True, "rich": True,
-                  "readout": {"model": "safe-model", "effort": "high", "permission_mode": "ask"}},
+                  "readout": {"model": "wrong-stock-child", "effort": "high", "permission_mode": "ask"}},
     }
 
 
@@ -36,13 +36,14 @@ def native(**updates):
         "schema_version": 1, "reporter_id": REPORTER, "pane_id": 7,
         "session_id": "real-main", "updated_at_ms": NOW, "status": "working",
         "run_id": "run-1", "background_jobs": 2, "health": "ready",
+        "model": "openai/native-main", "effort": "low",
     } | updates
 
 
 def ready_row():
     return {
         "pane_id": 7, "agent": "OhMyPi", "session_id": "real-main", "status": "working",
-        "activity": None, "turns": None, "model": "safe-model", "effort": "high",
+        "activity": None, "turns": None, "model": "openai/native-main", "effort": "low",
         "permission_mode": "ask", "rich": True,
         "omp": {"state": "ready", "run_id": "run-1", "background_jobs": 2},
     }
@@ -89,6 +90,8 @@ class NativeCollectorTests(unittest.TestCase):
         self.assertIsNone(row["session_id"])
         self.assertIsNone(row["activity"])
         self.assertIsNone(row["turns"])
+        self.assertIsNone(row["model"])
+        self.assertIsNone(row["effort"])
         self.assertIs(row["rich"], False)
         self.assertNotIn("inferred", row)
         self.assertEqual(row["omp"], {"state": state, "run_id": None, "background_jobs": None})
@@ -106,10 +109,82 @@ class NativeCollectorTests(unittest.TestCase):
         self.write_record()
         report = collect_report(self.config)
         self.assertEqual(report["agents"], [ready_row()])
+        self.assertEqual((report["agents"][0]["model"], report["agents"][0]["effort"]),
+                         ("openai/native-main", "low"))
         body = encode_report(report)
         self.assertEqual(decode_report(body, "host"), report)
         for excluded in (REPORTER.encode(), b"updated_at_ms", b"reporter_id", b"polluted-child"):
             self.assertNotIn(excluded, body)
+
+    def test_nullable_and_omitted_native_metadata_never_resurrects_stock_child(self):
+        for fields, expected in (
+            ({"model": None, "effort": None}, (None, None)),
+            ({}, (None, None)),
+            ({"model": "anthropic/native-main"}, ("anthropic/native-main", None)),
+            ({"effort": "off"}, (None, "off")),
+            ({"model": None, "effort": "medium"}, (None, "medium")),
+            ({"model": "openai/native-main", "effort": None}, ("openai/native-main", None)),
+        ):
+            with self.subTest(fields=fields):
+                data = native()
+                del data["model"], data["effort"]
+                self.write_record(data | fields)
+                report = collect_report(self.config)
+                row = report["agents"][0]
+                self.assertEqual((row["model"], row["effort"]), expected)
+                self.assertEqual((row["session_id"], row["status"], row["omp"]),
+                    ("real-main", "working", {"state": "ready", "run_id": "run-1", "background_jobs": 2}))
+                body = encode_report(report)
+                self.assertEqual(decode_report(body, "host"), report)
+                for excluded in (b"wrong-stock-child", REPORTER.encode(), b"updated_at_ms", b"reporter_id"):
+                    self.assertNotIn(excluded, body)
+
+    def test_metadata_changes_refresh_existing_main_session_run_and_status(self):
+        sampler = Sampler()
+        for poll, fields in enumerate((
+            {"model": "openai/native-main", "effort": "low"},
+            {"model": "anthropic/changed-main", "effort": "low"},
+            {"model": "anthropic/changed-main", "effort": "off"},
+            {"model": None, "effort": None},
+        )):
+            with self.subTest(fields=fields):
+                self.write_record(native(**fields))
+                row = collect_report(self.config, sampler=sampler, now=poll)["agents"][0]
+                self.assertEqual((row["model"], row["effort"]), (fields["model"], fields["effort"]))
+                self.assertEqual((row["session_id"], row["status"], row["omp"]),
+                    ("real-main", "working", {"state": "ready", "run_id": "run-1", "background_jobs": 2}))
+
+    def test_native_metadata_accepts_utf8_codepoint_boundary_and_literal_off(self):
+        self.write_record(native(model="界" * 128, effort="off"))
+        report = collect_report(self.config)
+        self.assertEqual((report["agents"][0]["model"], report["agents"][0]["effort"]),
+                         ("界" * 128, "off"))
+        self.assertEqual(decode_report(encode_report(report), "host"), report)
+        self.write_record(native(model="openai/native-main", effort="é" * 128))
+        self.assertEqual(collect_report(self.config)["agents"][0]["effort"], "é" * 128)
+
+    def test_invalid_native_metadata_rejects_entire_record_without_forwarding_private_data(self):
+        for field in ("model", "effort"):
+            for value in ("", " \t\n", "x" * 129, "界" * 129, "\ud800", True, 1,
+                          [], {"prompt": "PRIVATE_INJECTION"}):
+                with self.subTest(field=field, value=value):
+                    self.write_record(native(**{field: value}))
+                    report = collect_report(self.config)
+                    self.assert_unavailable(report["agents"][0], "invalid")
+                    self.assertNotIn(b"PRIVATE", encode_report(report))
+        for extra in ("prompt", "provider", "model_name", "api_key", "baseURL"):
+            with self.subTest(extra=extra):
+                self.write_record(native(**{extra: "PRIVATE_INJECTION"}))
+                report = collect_report(self.config)
+                self.assert_unavailable(report["agents"][0], "invalid")
+                self.assertNotIn(b"PRIVATE", encode_report(report))
+        path = self.write_record()
+        path.write_bytes(json.dumps(native()).encode().replace(b"openai/native-main", b"\xff"))
+        self.assert_unavailable(collect_report(self.config)["agents"][0], "invalid")
+        path.write_text(json.dumps(native())[:-1] + ',"model":"PRIVATE_DUPLICATE"}')
+        report = collect_report(self.config)
+        self.assert_unavailable(report["agents"][0], "invalid")
+        self.assertNotIn(b"PRIVATE", encode_report(report))
 
     def test_every_poll_observes_background_status_and_source_recovery(self):
         path = self.write_record()
@@ -135,7 +210,7 @@ class NativeCollectorTests(unittest.TestCase):
         self.write_record(native(pane_id=11))
         row = collect_report(self.config)["agents"][0]
         self.assertEqual((row["pane_id"], row["agent"], row["session_id"]), (11, "OhMyPi", "real-main"))
-        self.assertIsNone(row["model"])
+        self.assertEqual((row["model"], row["effort"]), ("openai/native-main", "low"))
         self.assertEqual(row["omp"]["state"], "ready")
 
     def test_native_source_does_not_turn_a_cli_failure_into_a_snapshot(self):

@@ -270,7 +270,7 @@ class InventoryCollectorTests(unittest.TestCase):
 
     def test_encoded_roster_failure_also_forwards_inventory_privacy(self):
         rows = [source_agent(pane, session_id="界" * 128, readout={
-                    "model": "界" * 128, "effort": "界" * 128, "permission_mode": "界" * 128})
+                    "model": "界" * 128, "effort": "界" * 128, "permission_mode": "界" * 128}) | {"agent": "ClaudeCode"}
                 for pane in range(1, 257)]
         report = main.collect_report(self.config({"agents": {"agents": rows}}, collect_source=False))
         self.assertEqual(decode_report(encode_report(report), "host"), {

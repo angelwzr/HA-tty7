@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError):
         print("OMP status extension installation refused unsafe or custom files; existing OMP settings were preserved.")
         return 1
-    print("OMP status reporter installed. Reload plugins or start a new OMP process for existing sessions; no session input was sent.")
+    print("OMP status reporter installed. Use /restart in existing OMP sessions after their work finishes; no session input was sent.")
     return 0
 
 

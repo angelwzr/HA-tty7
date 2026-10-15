@@ -93,4 +93,15 @@ describe('OMP native source boundary', () => {
     row[field] = field === 'session_id' ? 'child-session' : 3;
     expect(deriveHostView(host, statesFor(row), true).state).toBe('malformed');
   });
+  it('keeps a reported native model separate from unavailable thinking level', async () => {
+    const card = await mount(native({ model: 'native-provider/native-model', effort: null }));
+    card.shadowRoot!.querySelector<HTMLButtonElement>('.agent-row')!.click();
+    await card.updateComplete;
+    const details = card.shadowRoot!.querySelector('dl:not([hidden])')!;
+    const models = [...details.querySelectorAll('dt')].filter(term => term.textContent === 'Model');
+    expect(models).toHaveLength(1);
+    expect(models[0]!.nextElementSibling!.textContent).toBe('native-provider/native-model');
+    const effort = [...details.querySelectorAll('dt')].find(term => term.textContent === 'Effort')!;
+    expect(effort.nextElementSibling!.textContent).toBe('Not reported');
+  });
 });

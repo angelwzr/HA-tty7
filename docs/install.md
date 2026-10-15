@@ -1,6 +1,6 @@
 # Install HA-tty7
 
-> Use matching 0.4.2 integration and collector versions. Update/restart HA first, then run the reporter installer. Existing OMP processes need `/restart` after their work finishes. A release does not authorize deployment to a household instance.
+> Use matching 0.4.3 integration and collector versions. Update/restart HA first, then run the reporter installer. Existing OMP processes need `/restart` after their work finishes. A release does not authorize deployment to a household instance.
 
 ## Home Assistant
 
@@ -20,7 +20,7 @@ Download the pinned installer, review it, then run it:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.2/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.3/install.py \
   --output install-ha-tty7.py
 python3 install-ha-tty7.py
 ```
@@ -84,7 +84,9 @@ The host installer registers `~/.omp/agent/extensions/ha-tty7-status/index.ts`. 
 | Observed main activity ended with no pending work | Done; not proof of overall task success |
 | Missing, stale, unsupported, invalid or conflicting reporter | Unknown with a concise card warning; no tty7 status fallback |
 
-Child sessions never own pane status. Completion notifications are bounded/deduplicated per main session/run; reconnection and source recovery establish silent baselines. Source health and owner background count are in expanded details only. Native activity/turn counters remain unavailable instead of retaining tty7's child-contaminated counts. Models, effort and permission metadata still come only from existing allowlisted stock fields.
+Child sessions never own pane status or metadata. Completion notifications are bounded/deduplicated per main session/run; reconnection and source recovery establish silent baselines. Source health and owner background count are in expanded details only. Native activity/turn counters remain unavailable instead of retaining tty7's child-contaminated counts. Permission mode remains stock-supplied only, never inferred.
+
+The selected model (`provider/id`) and thinking level come from public `ctx.model` and `pi.getThinkingLevel()` on every native sample. Model and thinking-only changes refresh in place without a new run or notification. Literal `off` remains `off`; missing/throwing/invalid metadata getters produce null without breaking healthy status. Native values, including null, never fall back to another agent's stock metadata. Older status-only native records remain valid but cannot supply these new fields until the OMP process restarts with the updated extension.
 
 The credential-free OMP extension writes exact scalar records into `~/.local/share/ha-tty7/omp-status/`: directory 0700, files 0600, atomic publication, two-second heartbeat and ten-second freshness. A permanent private lock coordinates publication and expired-record cleanup; it is not a network listener. No messages, tool arguments/results, command lines or job labels are written. The Python collector alone holds the pairing URL and sends the existing verified HTTPS reports.
 

@@ -82,7 +82,6 @@ export class HaTty7Card extends LitElement {
     ];
     if (agent.omp) details.push([this.t('omp_status'), this.t(`omp_${agent.omp.state}`)],
       [this.t('background_jobs'), agent.omp.background_jobs]);
-    if (agent.model === null || agent.effort === null) details.push([this.t('model'), this.t('capability_unknown')]);
     if (tab) details.push([this.t('workspace'), tab.workspace_id], [this.t('tab'), tab.tab_id]);
     if (pane) details.push([this.t('live'), pane.live === null ? this.t('not_reported') : this.t(pane.live ? 'live' : 'not_live')],
       [this.t('hibernated'), this.t(pane.hibernated ? 'yes' : 'no')], [this.t('orphan'), this.t(pane.orphan ? 'yes' : 'no')]);
