@@ -79,15 +79,11 @@ export const cardStyles = css`
     font-family: ui-monospace, 'Cascadia Code', 'DejaVu Sans Mono', monospace; }
   .configuration { margin: 0; padding: 16px; line-height: 1.5; }
   .metadata { color: var(--tty-muted); font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
-  .summary, .filtered-count { color: var(--tty-muted); font-size: 12px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+  .summary, .inventory-summary, .filtered-count { color: var(--tty-muted); font-size: 12px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
   .group-head { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 9px 8px 5px; font-size: 12px; color: var(--tty-muted); overflow-wrap: anywhere; }
   .group-head h3 { flex-basis: 100%; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; color: var(--tty-ink); }
   .workspace-title { margin: 10px 14px 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
   .tab-group + .tab-group { border-top: 1px solid var(--tty-line); }
-  .source { padding: 8px 14px 12px; color: var(--tty-muted); font-size: 12px; }
-  .source summary { min-height: 44px; display: list-item; align-content: center; cursor: pointer; }
-  .source summary:focus-visible { outline: 2px solid var(--tty-blue); }
-  .source dl { margin: 0; }
   .inventory-panes { padding-top: 0; }
   @media (max-width: 380px) {
     header { padding: 10px; gap: 8px; }

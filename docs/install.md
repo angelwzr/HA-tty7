@@ -1,6 +1,6 @@
 # Install HA-tty7
 
-> Use matching 0.4.0 integration and collector versions. Update/restart HA first, then the collector. A release does not authorize deployment to a household instance.
+> Use matching 0.4.1 integration and collector versions. Update/restart HA first, then run the reporter installer. A release does not authorize deployment to a household instance.
 
 ## Home Assistant
 
@@ -15,6 +15,29 @@ HACS installs only the HA side. Each Linux user/host needs its own collector and
 ## Linux collector
 
 Requirements: Python 3.11+, stock tty7 CLI at a stable absolute path, verified HTTPS access to HA.
+
+Download the pinned installer, review it, then run it:
+
+```sh
+curl --fail --show-error --location --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.1/install.py \
+  --output install-ha-tty7.py
+python3 install-ha-tty7.py
+```
+
+New setup prompts for the HA host ID and a hidden pairing URL. Existing private pairing/settings are preserved without prompts. The script installs the pinned reporter wheel in a private virtual environment, validates stock tty7 and verified HTTPS delivery, then enables/restarts only the user reporter service. It never needs sudo, an HA account token, lingering or a TLS bypass. Existing custom units are preserved with a review warning.
+
+| Installer option | Purpose |
+| --- | --- |
+| `--tty7 PATH` | Use the stock CLI at this path; ephemeral AppImage CLIs are copied unchanged to a stable managed location |
+| `--tty7-config-dir PATH` | Nondefault stock server directory for a new setup |
+| `--ca-file PATH` | Trusted PEM CA for new pairing |
+| `--wheel PATH` | Explicit matching local wheel; package installation can be offline, delivery is still verified |
+| `--no-service` | Manual/container installation: no unit file or systemctl action |
+
+Conflicting overrides to existing settings are refused rather than silently changing them. Managed paths must be owned and safe; symlink/public-secret paths are rejected.
+
+### Manual source installation
 
 From a matching downloaded source checkout:
 
@@ -82,15 +105,35 @@ The user service uses the paths above, umask 0077 and no new privileges. It open
 
 ## Card and entity behavior
 
-Choose native HA or tty7 appearance, title, summary/model/effort/ID visibility, host/workspace/tab grouping, status/type filters and inferred-row inclusion in the visual editor. Filters affect only the view—not counts or alert baselines. English/Russian labels follow HA language; other languages fall back to English. Date/time follows HA profile preferences.
+The default is host-first sorting with only host, tab/session title and status. Unknown-status rows are hidden; selecting Unknown in the status filter explicitly opts in. All auxiliary receipts, counts, metadata and annotations have independent off-by-default card settings. Editor text/select/boolean controls and buttons use native HA components. Explicit saved settings remain honored.
+
+Choose native HA or tty7 appearance and optional workspace/tab grouping. Multiple hosts are supported and sorted by display label with a stable roster-ID tie-break. Local filters affect only the view—not counts or alert baselines. English/Russian labels follow HA language; other languages fall back to English. Date/time follows HA profile preferences.
 
 Grouping uses full source/workspace/tab IDs, not mutable names or ordinals. Split summaries keep agent and state from the same reported pane. Tab detection without lifecycle data stays **Unknown / Not reported**; it is not assigned to guessed panes. Orphans, hibernation and liveness remain separate from work state.
 
 Fixed host entities expose roster/connectivity, provenance-aware counts, health, HA receipt times, optional inventory totals and source diagnostics. Counts become unavailable on the corresponding failure/staleness, never misleading zero. Device version is the integration version; tty7 and collector versions are separate diagnostics.
 
-Stock tty7 may not report a model. The card shows **Not reported** rather than guessing or requiring a terminal patch. `effort = ""` explicitly means no level applies. Missing Codex sessions require a genuine enabled/trusted hook session; inspect Codex `/hooks` and start a fresh session if needed. This integration never trusts hooks or emits synthetic events.
+Stock tty7 may not report a model. Missing metadata is hidden in collapsed rows and explained as **Not reported** in expanded details, never guessed or supplied by a terminal patch. `effort = ""` explicitly means no level applies. Source diagnostics are not part of the card; use native diagnostic entities or the integration diagnostics download. Missing Codex sessions require a genuine enabled/trusted hook session; inspect Codex `/hooks` and start a fresh session if needed. This integration never trusts hooks or emits synthetic events.
 
 Session/turn timestamps, token/context/cost values and GUI-local unread state are not in the current agent roster. No timer is derived from receipts, uptime, activity or turns.
+
+## Notification templates
+
+Open **Settings → Devices & services → HA-tty7 → Configure**. Edit **Notification title template** and **Notification message template**, then finish the settings flow.
+
+Example title: `{tab_name}: {event}`. Example message: `{host_label} · {agent} · Pane {pane_id} · {event}`.
+
+| Placeholders | Meaning |
+| --- | --- |
+| `{host_label}`, `{host_id}` | Configured source label/identity |
+| `{agent}`, `{pane_id}`, `{session_id}`, `{status}` | Actual event metadata |
+| `{event}`, `{event_type}` | Readable “needs input” / “completed”; fixed `needs_input` / `completed` kind |
+| `{model}`, `{effort}`, `{permission_mode}` | Reported metadata; missing values empty, explicit empty effort is `None` |
+| `{tab_name}`, `{workspace_name}` | Approved names only from fresh, consistent inventory with an exact unambiguous pane join; otherwise empty |
+
+Each template allows up to 1024 characters. Use plain `{name}` placeholders and `{{` / `}}` for literal braces. Expressions/Jinja, attribute/index access, conversions, format specifications and unknown fields are rejected. User text is trusted; source values are escaped for Markdown/HTML before insertion. Titles flatten line breaks.
+
+Templates change notification text only. Existing notification toggles, baseline suppression, hashed tags and fixed dashboard destination remain unchanged. Persistent notifications append the dashboard link; Companion notifications keep its click action. No credential, arbitrary URL or command placeholders exist.
 
 ## Updates and removal
 

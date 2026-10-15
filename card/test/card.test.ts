@@ -112,6 +112,8 @@ describe('Lovelace card consumer behavior', () => {
     vi.useFakeTimers();
     vi.setSystemTime(FIXTURE_NOW);
     const card = await mount();
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts: hostConfigs, show_last_contact: true });
+    await card.updateComplete;
     const states = card.hass!.states;
     const receipt = states[hostConfigs[0]!.roster_entity]!.attributes.last_contact as string;
     const row = card.shadowRoot!.querySelector<HTMLButtonElement>('[data-pane="1"]')!;
@@ -121,7 +123,7 @@ describe('Lovelace card consumer behavior', () => {
     card.hass = { states };
     await card.updateComplete;
     expect(card.shadowRoot!.querySelector('[role="status"]')!.getAttribute('data-state')).toBe('healthy');
-    expect(card.shadowRoot!.querySelectorAll('.agent-row')).toHaveLength(6);
+    expect(card.shadowRoot!.querySelectorAll('.agent-row')).toHaveLength(5);
     expect(row.isConnected).toBe(true);
     expect(row.getAttribute('aria-expanded')).toBe('true');
     expect(card.shadowRoot!.querySelector('time')!.getAttribute('datetime')).toBe(receipt);

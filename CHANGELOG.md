@@ -4,6 +4,32 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
+### Added
+
+- GitHub-hosted terminal installer for the Linux reporter, preserving private pairing/settings and supporting manual/no-service installation.
+- Editable notification title/message templates in integration settings, with documented safe metadata placeholders.
+
+### Changed
+
+- Default card view is compact: host, tab/session title and status only. Auxiliary information is individually opt-in.
+- Unknown-status reported, detected-only and plain inventory rows are hidden unless explicitly selected.
+- Host grouping remains the default; multiple hosts sort by display name with stable source identity.
+- Card editor controls use native Home Assistant selectors and buttons consistently.
+- Source diagnostics are removed from the card; native integration diagnostics and diagnostic entities remain available.
+
+### Security
+
+- Installer never needs sudo or an HA account token, preserves existing pairing and private opt-ins, and refuses unsafe secret paths.
+- Notification templates alter text only; routing, hashed notification identities and lifecycle/baseline protections remain unchanged.
+
+### Upgrade requirements
+
+- This is patch version **0.4.1**. Update/restart HA to load card/editor/template changes; existing collector protocol remains compatible.
+- Explicit card settings remain honored. Omitted information flags use the new minimal defaults.
+- Notification template variables are escaped for their delivery sink. Model/effort values are never invented.
+
 ## [0.4.0] - 2026-10-15
 
 ### Added
@@ -75,7 +101,8 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 - Bundled card, visual editor and automatic frontend loading.
 - Host-bound HTTPS ingestion, freshness handling, restoration and optional notifications.
 
-[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/angelwzr/HA-tty7/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/angelwzr/HA-tty7/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/angelwzr/HA-tty7/releases/tag/v0.3.0
 [0.2.1]: https://github.com/angelwzr/HA-tty7/releases/tag/v0.2.1

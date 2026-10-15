@@ -8,7 +8,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (
-    "README.md", "CHANGELOG.md", "LICENSE", "hacs.json", "pyproject.toml", ".gitignore",
+    "README.md", "CHANGELOG.md", "LICENSE", "hacs.json", "pyproject.toml", ".gitignore", "install.py",
     "docs/install.md", "tools/build_release.py", "tools/export_public.py", "tools/release_notes.py",
     "card/package.json", "card/package-lock.json", "card/tsconfig.json",
     "card/vite.config.ts", "card/playwright.config.ts", "card/index.html", "card/README.md",

@@ -12,9 +12,11 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
 from .const import (CONF_BASE_URL, CONF_COMPLETION, CONF_DASHBOARD, CONF_HOST_ID,
-                    CONF_LABEL, CONF_NOTIFY, CONF_RETAIN_INVENTORY, CONF_WAITING, CONF_WEBHOOK_ID,
+                    CONF_LABEL, CONF_MESSAGE_TEMPLATE, CONF_NOTIFY, CONF_RETAIN_INVENTORY,
+                    CONF_TITLE_TEMPLATE, CONF_WAITING, CONF_WEBHOOK_ID,
                     DEFAULT_OPTIONS, DOMAIN)
 from .log_redaction import install_redactor
+from .template import valid_notification_template
 
 _HOST = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _MOBILE = re.compile(r"mobile_app_[a-z0-9_]+")
@@ -61,6 +63,9 @@ def _errors(hass: HomeAssistant, data: dict[str, Any], *, user: bool) -> dict[st
         errors[CONF_NOTIFY] = "invalid_destination"
     if not valid_dashboard(data.get(CONF_DASHBOARD)):
         errors[CONF_DASHBOARD] = "invalid_dashboard"
+    for key in (CONF_TITLE_TEMPLATE, CONF_MESSAGE_TEMPLATE):
+        if not valid_notification_template(data.get(key)):
+            errors[key] = "invalid_notification_template"
     for key in (CONF_WAITING, CONF_COMPLETION, CONF_RETAIN_INVENTORY):
         if type(data.get(key)) is not bool:
             errors[key] = "invalid_toggle"
@@ -77,6 +82,9 @@ def _schema(hass: HomeAssistant, defaults: dict[str, Any], *, user: bool) -> pro
         selector.SelectSelectorConfig(options=supported_destinations(hass), mode=selector.SelectSelectorMode.DROPDOWN))
     for key in (CONF_WAITING, CONF_COMPLETION):
         fields[probatio.Required(key, default=defaults.get(key, True))] = selector.BooleanSelector()
+    for key in (CONF_TITLE_TEMPLATE, CONF_MESSAGE_TEMPLATE):
+        fields[probatio.Required(key, default=defaults[key])] = selector.TextSelector(
+            selector.TextSelectorConfig(multiline=key == CONF_MESSAGE_TEMPLATE))
     fields[probatio.Required(CONF_RETAIN_INVENTORY, default=defaults.get(CONF_RETAIN_INVENTORY, False))] = selector.BooleanSelector()
     return probatio.Schema(fields)
 

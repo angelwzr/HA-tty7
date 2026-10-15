@@ -1,5 +1,12 @@
 export const STATUSES = ['idle', 'working', 'waiting', 'done', 'unknown'] as const;
 export type AgentStatus = (typeof STATUSES)[number];
+export const DEFAULT_STATUSES: readonly AgentStatus[] = ['idle', 'working', 'waiting', 'done'];
+export const INFORMATION_OPTIONS = [
+  'show_last_contact', 'show_last_success', 'show_summary', 'show_inventory_summary', 'show_filtered_count',
+  'show_inventory_status', 'show_inventory_last_contact', 'show_inventory_last_success', 'show_agent_type',
+  'show_pane_id', 'show_model', 'show_effort', 'show_session_id', 'show_derived_label', 'show_lifecycle', 'show_group_name',
+] as const;
+export type InformationOption = (typeof INFORMATION_OPTIONS)[number];
 export const ERROR_CODES = ['cli_unavailable', 'cli_timeout', 'cli_failed', 'invalid_payload', 'payload_too_large'] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
@@ -8,16 +15,12 @@ export interface HostConfig {
   roster_entity: string;
   connectivity_entity: string;
 }
-export interface CardConfig {
+export interface CardConfig extends Partial<Record<InformationOption, boolean>> {
   type: 'custom:ha-tty7-card';
   hosts: HostConfig[];
   title?: string;
   appearance?: 'tty7' | 'home-assistant';
   group_by?: 'host' | 'workspace' | 'tab';
-  show_summary?: boolean;
-  show_model?: boolean;
-  show_effort?: boolean;
-  show_session_id?: boolean;
   statuses?: AgentStatus[];
   agent_types?: string[];
   include_inferred?: boolean;
@@ -94,7 +97,6 @@ export interface RosterAttributes {
   inventory_last_contact?: string | null;
   inventory_last_success?: string | null;
   inventory_error_code?: ErrorCode | null;
-  source?: SourceInfo | null;
 }
 export interface WorkspaceRecord { workspace_id: string; name: string | null; tab_count: number; pane_count: number }
 export interface TabRecord {
@@ -109,10 +111,6 @@ export interface InventorySnapshot {
   consistent: boolean; names_included: boolean; derived_labels_included: boolean;
 }
 export type InventoryState = 'disabled' | 'unconfirmed' | 'healthy' | 'error' | 'stale';
-export interface SourceInfo {
-  state: 'available' | 'unavailable'; collector_version: string; tty7_build: string | null;
-  control_version: number | null; protocol_version: number | null; uptime_secs: number | null;
-}
 export type ReportOrigin = 'inferred' | 'structured_hook' | 'weak_report' | 'unknown';
 export interface TabView {
   identity: string; tab: TabRecord; agents: AgentView[]; representative: AgentView | null;
@@ -137,5 +135,4 @@ export interface HostView {
   inventoryLastContact: string | null;
   inventoryLastSuccess: string | null;
   inventoryErrorCode: ErrorCode | null;
-  source: SourceInfo | null;
 }

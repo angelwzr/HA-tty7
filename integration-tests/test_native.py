@@ -42,12 +42,12 @@ def inputs(host="desktop_demo", **changes):
                 notify_waiting=True, notify_completion=True, dashboard_path="/lovelace/agents") | changes
 
 
-async def add_host(hass, host="desktop_demo"):
+async def add_host(hass, host="desktop_demo", **changes):
     # Finish native dependency/route setup before creating the HTTP TestClient:
     # the pinned plugin does not bootstrap HTTP, and aiohttp freezes its app.
     await async_setup_component(hass, "persistent_notification", {})
     flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
-    pairing = await hass.config_entries.flow.async_configure(flow["flow_id"], inputs(host))
+    pairing = await hass.config_entries.flow.async_configure(flow["flow_id"], inputs(host, **changes))
     assert pairing["step_id"] == "pairing"
     assert pairing["description_placeholders"]["webhook_url"].startswith("https://ha.example/api/webhook/")
     result = await hass.config_entries.flow.async_configure(flow["flow_id"], {})
@@ -523,3 +523,121 @@ async def test_native_roster_errors_revoke_private_inventory_and_retention(hass,
     await hass.async_block_till_done()
     stored = await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_load()
     assert stored["inventory"] is None
+
+
+@pytest.mark.parametrize("field", ["notification_title_template", "notification_message_template"])
+@pytest.mark.parametrize("template", [
+    "{unknown}", "{agent.__class__}", "{agent[0]}", "{agent!r}", "{agent:>10}",
+    "{agent:}", "{agent", "agent}", "{}", "{0}", "{states(sensor.secret)}",
+    "{% if agent %}", "x" * 1025,
+])
+async def test_notification_templates_reject_unsafe_formatting_in_native_flows(hass, field, template):
+    await async_setup_component(hass, "persistent_notification", {})
+    flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    assert field in flow["data_schema"].schema
+    rejected = await hass.config_entries.flow.async_configure(flow["flow_id"], inputs(**{field: template}))
+    assert rejected["type"] is FlowResultType.FORM
+    assert rejected["errors"] == {field: "invalid_notification_template"}
+    entry = await add_host(hass)
+    options = await hass.config_entries.options.async_init(entry.entry_id)
+    changed = inputs(**{field: template})
+    changed.pop("host_id")
+    rejected = await hass.config_entries.options.async_configure(options["flow_id"], changed)
+    assert rejected["errors"] == {field: "invalid_notification_template"}
+
+
+async def test_notification_templates_persist_reload_and_reach_native_sinks(hass, hass_client, hass_ws_client):
+    await async_setup_component(hass, "persistent_notification", {})
+    initial = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    assert "notification_title_template" in initial["data_schema"].schema
+    title = "{{tty7}} {host_label} {event_type}\n{agent}"
+    message = "**Trusted text** {agent}|{model}|{effort}|{session_id}"
+    entry = await add_host(hass, notification_title_template=title, notification_message_template=message)
+    assert entry.options["notification_title_template"] == title
+    client = await hass_client()
+    ws = await hass_ws_client()
+    attack = "[x](https://evil.example)<b>&`\nnext"
+    await post(client, entry, [record()])
+    await post(client, entry, [record("done", name=attack)])
+    alerts = await notifications(ws)
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert["title"] == "{tty7} Desktop completed [x](https://evil.example)<b>&` next"
+    fence = "`" * 65
+    assert f"{fence} [x](https://evil.example)<b>&` next {fence}" in alert["message"]
+    assert alert["message"].startswith("**Trusted text** ")
+    assert "|||" in alert["message"]  # unavailable model and effort are both empty
+    assert f"{fence} synthetic-session {fence}" in alert["message"]
+    assert alert["message"].endswith("[Open agent dashboard](/lovelace/agents)")
+    original_identity = alert["notification_id"]
+    await hass.services.async_call("persistent_notification", "dismiss_all", {}, blocking=True)
+    delivered = []
+
+    @callback
+    def receive_mobile(call):
+        delivered.append(call.data)
+
+    hass.services.async_register("notify", "mobile_app_synthetic_templates", receive_mobile)
+    options = await hass.config_entries.options.async_init(entry.entry_id)
+    updated_title = "{host_id}/{status}/{event}/{pane_id}"
+    updated_message = "<b>Trusted</b> {agent}|{model}|{effort}|{permission_mode}"
+    changed = inputs(notify_destination="notify.mobile_app_synthetic_templates",
+                     notification_title_template=updated_title, notification_message_template=updated_message)
+    changed.pop("host_id")
+    await hass.config_entries.options.async_configure(options["flow_id"], changed)
+    await hass.config_entries.options.async_configure(options["flow_id"], {})
+    await hass.async_block_till_done()
+    assert entry.options["notification_message_template"] == updated_message
+    assert entry.options["notification_title_template"] == updated_title
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    await post(client, entry, [record("done", name=attack)])
+    assert delivered == []  # reload re-establishes baseline; never replays completion
+    await post(client, entry, [record()])
+    row = record("done", name=attack) | {"model": "<i>model</i>", "effort": "", "permission_mode": "[p](x)"}
+    await post(client, entry, [row])
+    assert len(delivered) == 1
+    assert delivered[0]["title"] == "desktop_demo/done/completed/1"
+    assert delivered[0]["message"] == "<b>Trusted</b> [x](https://evil.example)&lt;b&gt;&amp;` next|&lt;i&gt;model&lt;/i&gt;|None|[p](x)"
+    assert delivered[0]["data"] == {"tag": original_identity, "clickAction": "/lovelace/agents"}
+
+
+async def test_old_entry_uses_default_templates_without_migration(hass, hass_client, hass_ws_client):
+    entry = await add_host(hass)
+    old_options = {key: value for key, value in entry.options.items()
+                   if key not in ("notification_title_template", "notification_message_template")}
+    hass.config_entries.async_update_entry(entry, options=old_options)
+    await hass.async_block_till_done()
+    client = await hass_client()
+    ws = await hass_ws_client()
+    await post(client, entry, [record()])
+    await post(client, entry, [record("waiting")])
+    alert, = await notifications(ws)
+    assert alert["title"] == "Desktop: needs input"
+    assert " pane 1 needs input." in alert["message"]
+    assert alert["message"].endswith("[Open agent dashboard](/lovelace/agents)")
+
+
+async def test_notification_templates_native_inventory_names_use_only_approved_join(hass, hass_client, hass_ws_client):
+    from test_controller import inventory
+    await async_setup_component(hass, "persistent_notification", {})
+    flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    assert "notification_message_template" in flow["data_schema"].schema
+    entry = await add_host(hass, notification_title_template="{workspace_name}|{tab_name}",
+                           notification_message_template="{host_label}/{tab_name}/{workspace_name}")
+    client = await hass_client()
+    ws = await hass_ws_client()
+    for status in ("working", "done"):
+        body = encode_report(build_snapshot("desktop_demo", [record(status)], inventory=inventory()))
+        assert (await post(client, entry, body=body)).status == 204
+    alert, = await notifications(ws)
+    assert alert["title"] == "Private workspace|Private tab"
+    assert "Private tab" in alert["message"] and "Private workspace" in alert["message"]
+    await hass.services.async_call("persistent_notification", "dismiss_all", {}, blocking=True)
+    inconsistent = inventory("sample-inconsistent") | {"consistent": False}
+    for status in ("working", "done"):
+        body = encode_report(build_snapshot("desktop_demo", [record(status)], inventory=inconsistent))
+        assert (await post(client, entry, body=body)).status == 204
+    alert, = await notifications(ws)
+    assert alert["title"] == "|"
+    assert "Private tab" not in alert["message"] and "Private workspace" not in alert["message"]

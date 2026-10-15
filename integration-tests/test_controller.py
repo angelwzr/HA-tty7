@@ -220,3 +220,102 @@ def test_roster_read_errors_apply_privacy_without_refreshing_inventory():
     assert controller.attributes["inventory"] is None
     assert controller.attributes["inventory_state"] == "disabled"
     assert controller.attributes["inventory_last_success"] is None
+
+
+def test_template_metadata_has_honest_missing_and_explicit_empty_effort():
+    for effort, expected in [(None, ""), ("", "None"), ("high", "high")]:
+        event = agent("done", session=None) | {"kind": "completed", "effort": effort}
+        payload = notification_payload(
+            "desktop_demo", "Desktop", event, "/lovelace/agents", mobile=True,
+            title_template="{session_id}|{model}|{effort}|{permission_mode}|{tab_name}|{workspace_name}",
+            message_template="{host_id}/{status}/{event_type}/{event}/{pane_id}")
+        assert payload["title"] == f"||{expected}|||"
+        assert payload["message"] == "desktop_demo/done/completed/completed/1"
+
+
+def test_template_inventory_names_require_fresh_consistent_mutual_unambiguous_join():
+    # All fixtures are synthetic, protocol-validated metadata. No extra reads.
+    variants = [
+        ("approved", inventory(), True),
+        ("names-without-derived-labels", inventory() | {
+            "derived_labels_included": False,
+            "tabs": [inventory()["tabs"][0] | {"label": None}],
+        }, True),
+        ("derived-label-not-a-name", inventory() | {
+            "workspaces": [inventory()["workspaces"][0] | {"name": None}],
+            "tabs": [inventory()["tabs"][0] | {"name": None}],
+        }, False),
+        ("inconsistent", inventory() | {"consistent": False}, False),
+        ("no-names", inventory() | {
+            "names_included": False, "derived_labels_included": False,
+            "workspaces": [inventory()["workspaces"][0] | {"name": None}],
+            "tabs": [inventory()["tabs"][0] | {"name": None, "label": None, "group_name": None}],
+        }, False),
+        ("wrong-pane-tab", inventory() | {
+            "panes": [inventory()["panes"][0] | {"tab_id": "other-tab"}],
+        }, False),
+        ("missing-tab-pane", inventory() | {"tabs": [inventory()["tabs"][0] | {"pane_ids": []}]}, False),
+        ("ambiguous-tab", inventory() | {"tabs": [
+            inventory()["tabs"][0],
+            inventory()["tabs"][0] | {"tab_id": "second-tab", "name": "Other private tab"},
+        ]}, False),
+        ("orphan", inventory() | {"panes": [inventory()["panes"][0] | {"orphan": True}]}, False),
+        ("workspace-disagrees", inventory() | {
+            "panes": [inventory()["panes"][0] | {"workspace_id": "other-workspace"}],
+        }, False),
+        ("missing-workspace", inventory() | {"workspaces": []}, False),
+        ("missing-pane", inventory() | {"panes": []}, False),
+    ]
+    for name, section, allowed in variants:
+        controller = HostController("desktop_demo")
+        controller.accept(build_snapshot("desktop_demo", [agent()], inventory=section), NOW)
+        events = controller.accept(build_snapshot("desktop_demo", [agent("done")], inventory=section),
+                                   NOW + timedelta(seconds=1))
+        assert len(events) == 1, name
+        payload = notification_payload("desktop_demo", "Desktop", events[0], "/lovelace/agents",
+                                       mobile=True, title_template="{workspace_name}|{tab_name}")
+        assert payload["title"] == ("Private workspace|Private tab" if allowed else "|"), name
+    controller = HostController("desktop_demo")
+    section = inventory()
+    for second, status in [(0, "working"), (30, "working"), (46, "done")]:
+        events = controller.accept(build_snapshot("desktop_demo", [agent(status)], inventory=section),
+                                   NOW + timedelta(seconds=second))
+    assert controller.inventory_state == "stale" and len(events) == 1
+    payload = notification_payload("desktop_demo", "Desktop", events[0], "/lovelace/agents",
+                                   mobile=True, title_template="{workspace_name}|{tab_name}")
+    assert payload["title"] == "|"
+
+
+def test_template_names_withheld_after_inventory_read_error_and_restore():
+    for restored in (False, True):
+        controller = HostController("desktop_demo")
+        controller.accept(build_snapshot("desktop_demo", [agent()], inventory=inventory()), NOW)
+        if restored:
+            replacement = HostController("desktop_demo")
+            replacement.restore(controller.restore_attributes(retain_inventory=True), retain_inventory=True)
+            controller = replacement
+            section = inventory()  # cached pre-restart sample cannot restore confirmation
+            assert controller.accept(build_snapshot("desktop_demo", [agent()], inventory=section),
+                                     NOW + timedelta(seconds=1)) == []
+        else:
+            section = {"kind": "error", "error_code": "cli_failed"}
+        events = controller.accept(build_snapshot("desktop_demo", [agent("done")], inventory=section),
+                                   NOW + timedelta(seconds=2))
+        payload = notification_payload("desktop_demo", "Desktop", events[0], "/lovelace/agents",
+                                       mobile=True, title_template="{workspace_name}|{tab_name}")
+        assert payload["title"] == "|"
+
+
+def test_template_sink_escaping_covers_long_backtick_runs_quotes_and_line_breaks():
+    # Longer than the legacy 65-backtick delimiter; still valid model metadata.
+    value = "`" * 70 + '<a href="x">[link](https://evil.example)</a>\nnext'
+    event = agent("done") | {"kind": "completed", "model": value}
+    persistent = notification_payload("desktop_demo", "Desktop", event, "/lovelace/agents",
+                                       mobile=False, message_template="{model}")
+    assert persistent["message"].startswith("`" * 71 + " " + "`" * 70)
+    assert "\n" not in persistent["message"]
+    assert '</a> next ' + "`" * 71 in persistent["message"]
+    mobile = notification_payload("desktop_demo", "Desktop", event, "/lovelace/agents",
+                                   mobile=True, message_template="{model}")
+    assert '&lt;a href=&quot;x&quot;&gt;' in mobile["message"]
+    assert "<a" not in mobile["message"] and "\n" not in mobile["message"]

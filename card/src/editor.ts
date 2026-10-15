@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import type { CardConfig, HomeAssistant, HostConfig } from './contracts';
-import { STATUSES } from './contracts';
+import { DEFAULT_STATUSES, INFORMATION_OPTIONS, STATUSES } from './contracts';
 import { localize } from './localize';
 import type { MessageKey } from './localize';
 import { discoverHosts } from './discovery';
@@ -25,17 +25,9 @@ export class HaTty7CardEditor extends LitElement {
     legend { padding: 0 4px; }
     ha-selector { display: block; min-width: 0; margin: 8px 0 12px; }
     .pair { font-size: 12px; overflow-wrap: anywhere; }
-    button { min-height: 44px; min-width: 44px; padding: 8px 16px; border: 1px solid var(--divider-color, #bbb);
-      border-radius: 6px; color: inherit; background: var(--card-background-color, #fff); font: inherit; cursor: pointer; }
-    button:focus-visible, a:focus-visible { outline: 2px solid var(--primary-color, #1f6bf0); outline-offset: 2px; }
-    button:disabled { cursor: default; opacity: .5; }
     a { color: var(--primary-color, #1f6bf0); display: inline-block; min-height: 44px; padding: 8px 0; }
     .feedback { color: var(--error-color, #b3261e); }
     .display-options { display: grid; gap: 12px; }
-    .display-options label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
-    .display-options select, textarea { min-width: 0; max-width: 100%; min-height: 44px; color: inherit; background: var(--card-background-color, #fff); font: inherit; font-size: 16px; padding: 8px; }
-    .display-options input { width: 44px; height: 44px; margin: 0; flex-shrink: 0; }
-    textarea { width: 100%; }
   `;
   private currentHass: HomeAssistant | undefined;
   private rows: HostRow[] = [];
@@ -56,7 +48,7 @@ export class HaTty7CardEditor extends LitElement {
     this.cardTitle = this.cardTitle.trim() === title ? this.cardTitle : title;
     this.appearance = record(value) && (value.appearance === 'tty7' || value.appearance === 'home-assistant') ? value.appearance : undefined;
     const display: Record<string, unknown> = { type: 'custom:ha-tty7-card', hosts: [] };
-    if (record(value)) for (const key of ['group_by', 'show_summary', 'show_model', 'show_effort', 'show_session_id', 'statuses', 'agent_types', 'include_inferred']) {
+    if (record(value)) for (const key of ['group_by', ...INFORMATION_OPTIONS, 'statuses', 'agent_types', 'include_inferred']) {
       if (Object.hasOwn(value, key)) display[key] = value[key];
     }
     try {
@@ -157,7 +149,7 @@ export class HaTty7CardEditor extends LitElement {
     if (!this.rows.some(row => row.id === rowId)) return;
     this.rows = this.rows.filter(row => row.id !== rowId);
     this.publish();
-    void this.updateComplete.then(() => this.shadowRoot?.querySelector<HTMLButtonElement>('[data-action="add"]')?.focus());
+    void this.updateComplete.then(() => this.shadowRoot?.querySelector<HTMLElement>('[data-action="add"]')?.focus());
   }
 
   protected override render() {
@@ -190,29 +182,28 @@ export class HaTty7CardEditor extends LitElement {
             @value-changed=${(event: CustomEvent<{ value: unknown }>) => this.labelChanged(event, row.id)}></ha-selector>
           ${row.host.roster_entity && row.host.connectivity_entity ? html`<p class="pair">${this.t('roster')}: ${row.host.roster_entity}<br>
             ${this.t('connectivity')}: ${row.host.connectivity_entity}</p>` : nothing}
-          <button type="button" data-action="remove" aria-label=${`${this.t('remove_host')} ${index + 1}`} @click=${() => this.removeRow(row.id)}>${this.t('remove_host')}</button>
+          <ha-button data-action="remove" size="l" variant="neutral" appearance="outlined" aria-label=${`${this.t('remove_host')} ${index + 1}`} @click=${() => this.removeRow(row.id)}>${this.t('remove_host')}</ha-button>
         </fieldset>`;
       })}
       ${this.feedback ? html`<p class="feedback" role="alert">${this.feedback}</p>` : nothing}
-      <button type="button" data-action="add" ?disabled=${this.rows.length >= 64} @click=${this.addRow}>${this.t('add_host')}</button>
+      <ha-button data-action="add" size="l" appearance="filled" .disabled=${this.rows.length >= 64} @click=${this.addRow}>${this.t('add_host')}</ha-button>
       <fieldset class="display-options"><legend>${this.t('group_by')}</legend>
-        <label>${this.t('group_by')}<select data-field="group_by" .value=${this.presentation.group_by ?? 'host'}
-          @change=${(event: Event) => this.presentationChanged('group_by', (event.target as HTMLSelectElement).value)}>
-          ${(['host', 'workspace', 'tab'] as const).map(group => html`<option value=${group}>${this.t(`group_${group}`)}</option>`)}
-        </select></label>
-        ${(['show_summary', 'show_model', 'show_effort', 'show_session_id', 'include_inferred'] as const).map(key => html`
-          <label><input type="checkbox" data-field=${key} .checked=${this.presentation[key] ?? key !== 'show_session_id'}
-            @change=${(event: Event) => this.presentationChanged(key, (event.target as HTMLInputElement).checked)}>${this.t(key)}</label>`)}
-        <fieldset><legend>${this.t('statuses')}</legend>${STATUSES.map(status => html`<label><input type="checkbox" data-status=${status}
-          .checked=${!this.presentation.statuses || this.presentation.statuses.includes(status)}
-          @change=${(event: Event) => {
-            const selected = this.presentation.statuses ?? [...STATUSES];
-            this.presentationChanged('statuses', (event.target as HTMLInputElement).checked ? [...selected, status] : selected.filter(item => item !== status));
-          }}>${this.t(status)}</label>`)}</fieldset>
-        <label for="agent-types">${this.t('agent_types')}</label>
-        <textarea id="agent-types" data-field="agent_types" aria-describedby="agent-types-help" .value=${this.presentation.agent_types?.join('\n') ?? ''}
-          @change=${(event: Event) => this.presentationChanged('agent_types', [...new Set((event.target as HTMLTextAreaElement).value.split('\n').map(value => value.trim()).filter(Boolean))])}></textarea>
-        <p id="agent-types-help">${this.t('agent_types_help')}</p>
+        <ha-selector data-field="group_by" .hass=${this.currentHass} .label=${this.t('group_by')}
+          .selector=${{ select: { options: (['host', 'workspace', 'tab'] as const).map(group => ({ value: group, label: this.t(`group_${group}`) })),
+            mode: 'dropdown', custom_value: false } }} .value=${this.presentation.group_by ?? 'host'}
+          @value-changed=${(event: CustomEvent<{ value: unknown }>) => { event.stopPropagation(); this.presentationChanged('group_by', event.detail.value); }}></ha-selector>
+        ${[...INFORMATION_OPTIONS, 'include_inferred' as const].map(key => html`
+          <ha-selector data-field=${key} .hass=${this.currentHass} .label=${this.t(key)} .selector=${{ boolean: {} }}
+            .value=${this.presentation[key] ?? key === 'include_inferred'}
+            @value-changed=${(event: CustomEvent<{ value: unknown }>) => { event.stopPropagation(); this.presentationChanged(key, event.detail.value); }}></ha-selector>`)}
+        <ha-selector data-field="statuses" .hass=${this.currentHass} .label=${this.t('statuses')}
+          .selector=${{ select: { options: STATUSES.map(status => ({ value: status, label: this.t(status) })),
+            mode: 'list', multiple: true, custom_value: false } }} .value=${this.presentation.statuses ?? DEFAULT_STATUSES}
+          @value-changed=${(event: CustomEvent<{ value: unknown }>) => { event.stopPropagation(); this.presentationChanged('statuses', event.detail.value); }}></ha-selector>
+        <ha-selector data-field="agent_types" .hass=${this.currentHass} .label=${this.t('agent_types')}
+          .selector=${{ select: { options: this.presentation.agent_types ?? [], mode: 'dropdown', multiple: true, custom_value: true } }}
+          .value=${this.presentation.agent_types ?? []} .helper=${this.t('agent_types_help')}
+          @value-changed=${(event: CustomEvent<{ value: unknown }>) => { event.stopPropagation(); this.presentationChanged('agent_types', event.detail.value); }}></ha-selector>
       </fieldset>
     `;
   }

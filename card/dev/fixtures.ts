@@ -71,11 +71,13 @@ export function fixtureStates(scenario: Scenario, now = FIXTURE_NOW): HassStates
       attributes.inventory_state = 'healthy';
       attributes.inventory_last_contact = contact;
       attributes.inventory_last_success = contact;
-      attributes.source = { state: 'available', collector_version: '0.4.0', tty7_build: 'synthetic-stock-build',
-        control_version: 1, protocol_version: null, uptime_secs: 30 };
     }
     const state = ['error', 'stale', 'unconfirmed'].includes(scenario) ? scenario : String(agents.length);
     states[host.roster_entity] = { state, attributes: { ...attributes } };
+    if (scenario === 'inventory') states[host.roster_entity]!.attributes.source = {
+      state: 'available', collector_version: '0.4.1', tty7_build: 'synthetic-stock-build',
+      control_version: 1, protocol_version: null, uptime_secs: 30,
+    };
     states[host.connectivity_entity] = { state: ['error', 'stale', 'unconfirmed', 'offline'].includes(scenario) ? 'off' : 'on', attributes: {} };
     if (scenario === 'malformed') states[host.roster_entity]!.attributes.agents = null;
   }

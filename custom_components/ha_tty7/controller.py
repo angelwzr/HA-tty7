@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import hashlib
-import html
 import json
 from typing import Any
 
@@ -11,6 +10,7 @@ from .protocol import (
     FRESHNESS_SECONDS, AgentRecord, ErrorReport, InventoryReport, PayloadError,
     Snapshot, SourceInfo, build_error, build_snapshot,
 )
+from .template import DEFAULT_MESSAGE_TEMPLATE, DEFAULT_TITLE_TEMPLATE, TEMPLATE_FIELDS, format_notification
 STATUSES = ("idle", "working", "waiting", "done", "unknown")
 
 
@@ -197,6 +197,26 @@ class HostController:
             self.inventory_last_contact = self.inventory_last_success = now
             self.inventory_error_code = None
 
+    def _notification_names(self, pane_id: int) -> dict[str, str | None]:
+        """Use names only from a fresh approved, mutually agreeing unique join."""
+        inventory = self.inventory
+        if (self.inventory_state != "healthy" or inventory is None or inventory["kind"] != "snapshot"
+                or not inventory["consistent"] or not inventory["names_included"]):
+            return {}
+        panes = [pane for pane in inventory["panes"] if pane["pane_id"] == pane_id]
+        tabs = [tab for tab in inventory["tabs"] if pane_id in tab["pane_ids"]]
+        if len(panes) != 1 or len(tabs) != 1:
+            return {}
+        pane, tab = panes[0], tabs[0]
+        if (pane["orphan"] or pane["workspace_id"] != tab["workspace_id"]
+                or pane["tab_id"] != tab["tab_id"]):
+            return {}
+        workspaces = [workspace for workspace in inventory["workspaces"]
+                      if workspace["workspace_id"] == tab["workspace_id"]]
+        if len(workspaces) != 1:
+            return {}
+        return {"tab_name": tab["name"], "workspace_name": workspaces[0]["name"]}
+
     def accept(self, report: Snapshot | ErrorReport, now: datetime) -> list[dict[str, Any]]:
         """Consume a shared-protocol-validated, host-bound report."""
         self.expire(now)
@@ -236,21 +256,25 @@ class HostController:
             elif agent["status"] == "done" and prior == "working":
                 kind = "completed"
             if kind is not None:
-                events.append(dict(agent, kind=kind))
+                events.append(dict(agent, kind=kind, **self._notification_names(agent["pane_id"])))
         return events
 
 
-def notification_payload(host_id: str, label: str, event: dict[str, Any], dashboard: str, *, mobile: bool) -> dict[str, Any]:
+def notification_payload(
+    host_id: str, label: str, event: dict[str, Any], dashboard: str, *, mobile: bool,
+    title_template: str = DEFAULT_TITLE_TEMPLATE, message_template: str = DEFAULT_MESSAGE_TEMPLATE,
+) -> dict[str, Any]:
     """Encode untrusted text for its exact sink; identity does not reveal sessions."""
     identity = json.dumps([event["session_id"], event["pane_id"]], ensure_ascii=False, separators=(",", ":"))
     tag = f"ha_tty7_{host_id}_" + hashlib.sha256(identity.encode()).hexdigest()
     action = "needs input" if event["kind"] == "needs_input" else "completed"
+    values = {key: "" if event.get(key) is None else str(event[key]) for key in TEMPLATE_FIELDS}
+    values.update(host_id=host_id, host_label=label, event=action, event_type=event["kind"])
+    if event.get("effort") == "":
+        values["effort"] = "None"
+    title = format_notification(title_template, values, sink="plain")
+    message = format_notification(message_template, values, sink="html" if mobile else "markdown")
     if mobile:
-        message = f"{html.escape(label, quote=False)}: {html.escape(event['agent'], quote=False)} pane {event['pane_id']} {action}."
-        return {"title": f"{label}: {action}", "message": message,
+        return {"title": title, "message": message,
                 "data": {"tag": tag, "clickAction": dashboard}}
-    fence = "`" * 65
-    name = event["agent"].replace("\r", " ").replace("\n", " ")
-    safe_label = label.replace("\r", " ").replace("\n", " ")
-    message = f"{fence} {safe_label} {fence}: {fence} {name} {fence} pane {event['pane_id']} {action}. [Open agent dashboard]({dashboard})"
-    return {"title": f"{label}: {action}", "message": message, "notification_id": tag}
+    return {"title": title, "message": f"{message} [Open agent dashboard]({dashboard})", "notification_id": tag}

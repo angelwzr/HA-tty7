@@ -74,7 +74,7 @@ describe('stock inventory card contract', () => {
     expect(view.state).toBe('healthy'); expect(view.agents[0]!.effort).toBe(''); expect(view.agents[1]!.rich).toBe(false);
   });
   it('pairs split-parent type with the most urgent reported status and keeps detections tab-level', async () => {
-    const card = await mount({ group_by: 'tab' });
+    const card = await mount({ group_by: 'tab', statuses: ['idle', 'working', 'waiting', 'done', 'unknown'], show_agent_type: true, show_lifecycle: true });
     const parent = card.shadowRoot!.querySelector('[data-tab="tab-1"]')!;
     expect(parent.textContent).toContain('WaitingAgent'); expect(parent.textContent).toContain('Waiting');
     expect(parent.textContent).not.toContain('RepresentativeOnly');
@@ -84,7 +84,7 @@ describe('stock inventory card contract', () => {
     expect(card.shadowRoot!.textContent).toContain('Orphan');
   });
   it('filters locally without changing totals or group identity across renames and reorder', async () => {
-    const card = await mount({ group_by: 'tab', statuses: ['waiting'] });
+    const card = await mount({ group_by: 'tab', statuses: ['waiting'], show_summary: true, show_filtered_count: true });
     const parent = card.shadowRoot!.querySelector('[data-tab="tab-1"]')!;
     expect(card.shadowRoot!.querySelector('.summary')!.textContent).toContain('2 reported');
     expect(card.shadowRoot!.querySelector('.filtered-count')!.textContent).toContain('1 / 2');
@@ -99,30 +99,28 @@ describe('stock inventory card contract', () => {
       if ('include_inferred' in settings) {
         (value.states[host.roster_entity]!.attributes.agents as Record<string, unknown>[])[1]!.inferred = true;
       }
-      const card = await mount({ group_by: groupBy, ...settings }, value);
+      const card = await mount({ group_by: groupBy, show_agent_type: true, ...settings }, value);
       const heading = card.shadowRoot!.querySelector('[data-tab="tab-1"] .group-head')!;
       expect(heading.textContent).toContain('WorkingAgent');
       expect(heading.textContent).toContain('Working');
       expect(heading.textContent).not.toContain('WaitingAgent');
       expect(card.shadowRoot!.querySelector('[data-pane="1"]')).not.toBeNull();
       expect(card.shadowRoot!.querySelector('[data-pane="2"]')).toBeNull();
-      expect(card.shadowRoot!.querySelector('.summary')!.textContent).toContain('2 reported');
     }
   });
-  it('retains row details through local status/type/inferred filtering without changing the reported summary', async () => {
+  it('retains row details through local status/type/inferred filtering', async () => {
     const card = await mount();
     const row = card.shadowRoot!.querySelector<HTMLButtonElement>('[data-pane="1"]')!; row.click(); await card.updateComplete;
     card.setConfig({ type: 'custom:ha-tty7-card', hosts: [host], agent_types: ['WaitingAgent'], include_inferred: false });
     await card.updateComplete;
     expect(card.shadowRoot!.querySelector('[data-pane="1"]')).toBeNull();
-    expect(card.shadowRoot!.querySelector('.summary')!.textContent).toContain('2 reported');
     card.setConfig({ type: 'custom:ha-tty7-card', hosts: [host] }); await card.updateComplete;
     expect(card.shadowRoot!.querySelector('[data-pane="1"]')!.getAttribute('aria-expanded')).toBe('true');
   });
   it('excludes inferred rows locally while preserving inferred totals and never counting them as confirmed', async () => {
     const value = hass();
     (value.states[host.roster_entity]!.attributes.agents as Record<string, unknown>[])[0]!.inferred = true;
-    const card = await mount({ include_inferred: false }, value);
+    const card = await mount({ include_inferred: false, show_summary: true }, value);
     expect(card.shadowRoot!.querySelector('[data-pane="1"]')).toBeNull();
     expect(card.shadowRoot!.querySelector('[data-pane="2"]')).not.toBeNull();
     expect(card.shadowRoot!.querySelector('.summary')!.textContent).toContain('1 inferred');
@@ -142,12 +140,11 @@ describe('stock inventory card contract', () => {
     const card = await mount({ group_by: 'tab' }, value);
     expect(card.shadowRoot!.querySelector('[data-tab="tab-1"]')).not.toBeNull();
     expect(card.shadowRoot!.querySelector('[data-pane="1"] .agent-name')!.textContent).toBe('WorkingAgent');
-    expect(card.shadowRoot!.querySelector('[data-inventory-state="healthy"]')).not.toBeNull();
   });
   it('uses derived labels only with both consent flags and marks their origin', async () => {
     const value = hass(); const snapshot = value.states[host.roster_entity]!.attributes.inventory as InventorySnapshot;
     snapshot.derived_labels_included = true; snapshot.tabs[0]!.name = null; snapshot.tabs[0]!.label = HOSTILE;
-    const card = await mount({}, value);
+    const card = await mount({ show_derived_label: true }, value);
     expect(card.shadowRoot!.querySelector('[data-pane="1"] .agent-name')!.textContent).toBe(HOSTILE);
     expect(card.shadowRoot!.querySelector('[data-pane="1"]')!.textContent).toContain('Derived label');
     expect(card.shadowRoot!.querySelector('img,script,iframe')).toBeNull();
@@ -158,7 +155,7 @@ describe('stock inventory card contract', () => {
     const value = hass();
     const first = (value.states[host.roster_entity]!.attributes.agents as Record<string, unknown>[])[0]!;
     Object.assign(first, { model: null, effort: null, session_id: null });
-    const card = await mount({ show_session_id: true }, value);
+    const card = await mount({ show_session_id: true, show_model: true, show_effort: true }, value);
     const row = card.shadowRoot!.querySelector<HTMLButtonElement>('[data-pane="1"]')!;
     expect(row.querySelector('.metadata')).toBeNull();
     expect(row.textContent).not.toContain('Not reported');
@@ -180,12 +177,12 @@ describe('stock inventory card contract', () => {
   it('does not claim detection for a plain tab or display missing orphan liveness', async () => {
     const value = hass(); const snapshot = value.states[host.roster_entity]!.attributes.inventory as InventorySnapshot;
     snapshot.tabs[1]!.detected_agent = null; snapshot.panes[3]!.live = null;
-    const card = await mount({ group_by: 'tab' }, value);
+    const card = await mount({ group_by: 'tab', statuses: ['unknown'] }, value);
     expect(card.shadowRoot!.querySelector('[data-tab="tab-2"] .group-head')!.textContent).not.toContain('Detected only');
     expect(card.shadowRoot!.querySelector('.inventory-panes')!.textContent).not.toContain('Not reported');
   });
   it('shows honest model/effort/provenance and does not infer capability from versions', async () => {
-    const card = await mount(); const row = card.shadowRoot!.querySelector<HTMLButtonElement>('[data-pane="1"]')!;
+    const card = await mount({ show_effort: true, show_summary: true }); const row = card.shadowRoot!.querySelector<HTMLButtonElement>('[data-pane="1"]')!;
     expect(row.textContent).toContain('None applicable');
     row.click(); await card.updateComplete;
     expect(card.shadowRoot!.textContent).toContain('Structured hook'); expect(card.shadowRoot!.textContent).toContain('Capability unknown');
@@ -219,6 +216,7 @@ describe('stock inventory card contract', () => {
   });
   it('updates Russian labels from the HA profile and falls back to English elsewhere', async () => {
     const card = await mount();
+    card.shadowRoot!.querySelector<HTMLButtonElement>('[data-pane="1"]')!.click(); await card.updateComplete;
     card.hass = { ...card.hass!, locale: { language: 'ru', number_format: 'language', time_format: '24', date_format: 'DMY', first_weekday: 'language', time_zone: 'server' } };
     await card.updateComplete;
     expect(card.shadowRoot!.textContent).toContain('Не сообщается'); expect(card.shadowRoot!.textContent).toContain('Ожидание');

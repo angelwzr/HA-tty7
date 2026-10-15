@@ -16,7 +16,8 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import (CONF_COMPLETION, CONF_HOST_ID, CONF_LABEL, CONF_NOTIFY, CONF_RETAIN_INVENTORY, CONF_WAITING,
+from .const import (CONF_COMPLETION, CONF_HOST_ID, CONF_LABEL, CONF_MESSAGE_TEMPLATE, CONF_NOTIFY,
+                    CONF_RETAIN_INVENTORY, CONF_TITLE_TEMPLATE, CONF_WAITING,
                     CONF_WEBHOOK_ID, DEFAULT_OPTIONS, DOMAIN, MODULE_URL, PLATFORMS, STATIC_URL)
 from .controller import HostController, notification_payload
 from .protocol import MAX_BODY_BYTES, PayloadError, decode_report
@@ -115,7 +116,9 @@ class HostRuntime:
             return
         domain, service = destination.split(".", 1)
         payload = notification_payload(self.controller.host_id, self.entry.data[CONF_LABEL], event,
-                                       options["dashboard_path"], mobile=domain == "notify")
+                                       options["dashboard_path"], mobile=domain == "notify",
+                                       title_template=options[CONF_TITLE_TEMPLATE],
+                                       message_template=options[CONF_MESSAGE_TEMPLATE])
         try:
             await self.hass.services.async_call(domain, service, payload, blocking=True)
         except HomeAssistantError:

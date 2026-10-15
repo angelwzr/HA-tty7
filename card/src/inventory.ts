@@ -1,4 +1,5 @@
-import type { AgentRecord, AgentView, CardConfig, HostView, InventorySnapshot, PaneRecord, ReportOrigin, SourceInfo, TabRecord, TabView, WorkspaceRecord, WorkspaceView } from './contracts';
+import { DEFAULT_STATUSES } from './contracts';
+import type { AgentRecord, AgentView, CardConfig, HostView, InventorySnapshot, PaneRecord, ReportOrigin, TabRecord, TabView, WorkspaceRecord, WorkspaceView } from './contracts';
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -55,13 +56,6 @@ export function parseInventory(value: unknown): InventorySnapshot | null {
     names_included: names, derived_labels_included: derived };
 }
 
-export function parseSource(value: unknown): SourceInfo | null {
-  if (!record(value) || !['available', 'unavailable'].includes(value.state as string) || !text(value.collector_version)
-    || !nullableText(value.tty7_build) || !nullableInteger(value.control_version) || !nullableInteger(value.protocol_version)
-    || !nullableInteger(value.uptime_secs)) return null;
-  return { state: value.state as SourceInfo['state'], collector_version: value.collector_version, tty7_build: value.tty7_build,
-    control_version: value.control_version, protocol_version: value.protocol_version, uptime_secs: value.uptime_secs };
-}
 
 export function origin(agent: AgentRecord): ReportOrigin {
   if (agent.inferred === true) return 'inferred';
@@ -71,7 +65,7 @@ export function origin(agent: AgentRecord): ReportOrigin {
 }
 export function filterAgents(agents: AgentView[], config: CardConfig): AgentView[] {
   return agents.filter(agent => (config.include_inferred !== false || agent.inferred !== true)
-    && (!config.statuses || config.statuses.includes(agent.status)) && (!config.agent_types?.length || config.agent_types.includes(agent.agent)));
+    && (config.statuses ?? DEFAULT_STATUSES).includes(agent.status) && (!config.agent_types?.length || config.agent_types.includes(agent.agent)));
 }
 /** Join only direct, mutually agreeing membership. Ambiguous cross-query membership stays ungrouped. */
 export function tabForPane(inventory: InventorySnapshot | null, paneId: number): TabRecord | null {

@@ -141,7 +141,7 @@ describe('native host discovery and picker consumer', () => {
     await editor.updateComplete;
     expect(configs.at(-1)).toEqual({ type: 'custom:ha-tty7-card', hosts: [] });
   });
-  it('never emits secrets, options or arbitrary registry data and blocks duplicate labels', async () => {
+  it('never emits secrets, options or arbitrary registry data', async () => {
     const editor = await mount({ type: 'custom:ha-tty7-card', hosts: [{ ...hostConfigs[0], webhook_url: 'PRIVATE_PAIRING' }], options: { token: 'PRIVATE_TOKEN' } });
     const configs = listen(editor);
     change(editor, 'name', 'Visible label');
@@ -149,9 +149,6 @@ describe('native host discovery and picker consumer', () => {
     expect(configs[0]).toEqual({ type: 'custom:ha-tty7-card', hosts: [{ ...hostConfigs[0], name: 'Visible label' }] });
     expect(JSON.stringify(configs)).not.toMatch(/PRIVATE|webhook|token|options/);
     expect(editor.shadowRoot!.textContent).not.toContain('PRIVATE');
-    editor.setConfig({ type: 'custom:ha-tty7-card', hosts: hostConfigs });
-    change(editor, 'name', 'Laptop');
-    expect(configs).toHaveLength(1);
   });
   it('keeps partial editing visible and provides setup guidance when no integration is installed', async () => {
     const editor = await mount({ type: 'custom:ha-tty7-card', hosts: [{ name: 'Draft' }] }, { states: {} } as HomeAssistant);

@@ -1,6 +1,6 @@
-import { ERROR_CODES, STATUSES } from './contracts';
+import { ERROR_CODES, INFORMATION_OPTIONS, STATUSES } from './contracts';
 import type { AgentRecord, AgentStatus, CardConfig, Counts, ErrorCode, HassStates, HostConfig, HostView } from './contracts';
-import { parseInventory, parseSource, origin } from './inventory';
+import { parseInventory, origin } from './inventory';
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -23,42 +23,39 @@ function safeNumber(value: unknown): value is number {
 }
 
 export function validateConfig(value: unknown): CardConfig {
-  const fail = () => { throw new Error('Configure unique host names, sensor rosters, and binary_sensor connectivity entities.'); };
+  const fail = () => { throw new Error('Configure host labels, unique sensor rosters, and binary_sensor connectivity entities.'); };
   if (!object(value) || value.type !== 'custom:ha-tty7-card' || !Array.isArray(value.hosts)
     || value.hosts.length > 64
-    || Object.keys(value).some(key => !['type', 'hosts', 'title', 'appearance', 'group_by', 'show_summary', 'show_model', 'show_effort', 'show_session_id', 'statuses', 'agent_types', 'include_inferred'].includes(key))) return fail();
+    || Object.keys(value).some(key => !['type', 'hosts', 'title', 'appearance', 'group_by', ...INFORMATION_OPTIONS, 'statuses', 'agent_types', 'include_inferred'].includes(key))) return fail();
   if (Object.hasOwn(value, 'title') && (!boundedString(value.title, 128) || !value.title.trim())) return fail();
   if (Object.hasOwn(value, 'appearance') && !['tty7', 'home-assistant'].includes(value.appearance as string)) return fail();
   if (Object.hasOwn(value, 'group_by') && !['host', 'workspace', 'tab'].includes(value.group_by as string)) return fail();
-  for (const key of ['show_summary', 'show_model', 'show_effort', 'show_session_id', 'include_inferred']) {
+  for (const key of [...INFORMATION_OPTIONS, 'include_inferred']) {
     if (Object.hasOwn(value, key) && typeof value[key] !== 'boolean') return fail();
   }
   if (Object.hasOwn(value, 'statuses') && (!Array.isArray(value.statuses) || value.statuses.length > 5
     || value.statuses.some(status => !STATUSES.includes(status as AgentStatus)) || new Set(value.statuses).size !== value.statuses.length)) return fail();
   if (Object.hasOwn(value, 'agent_types') && (!Array.isArray(value.agent_types) || value.agent_types.length > 256
     || value.agent_types.some(agent => !boundedString(agent, 64)) || new Set(value.agent_types).size !== value.agent_types.length)) return fail();
-  const names = new Set<string>();
   const entities = new Set<string>();
   const hosts: HostConfig[] = [];
   for (const host of value.hosts) {
     if (!object(host) || Object.keys(host).some(key => !['name', 'roster_entity', 'connectivity_entity'].includes(key))
       || !boundedString(host.name, 128) || !host.name.trim() || typeof host.roster_entity !== 'string' || typeof host.connectivity_entity !== 'string'
       || !/^sensor\.[a-z0-9_]+$/.test(host.roster_entity) || !/^binary_sensor\.[a-z0-9_]+$/.test(host.connectivity_entity)
-      || names.has(host.name.trim()) || entities.has(host.roster_entity) || entities.has(host.connectivity_entity)) return fail();
-    names.add(host.name.trim());
+      || entities.has(host.roster_entity) || entities.has(host.connectivity_entity)) return fail();
     entities.add(host.roster_entity);
     entities.add(host.connectivity_entity);
     hosts.push({ name: host.name.trim(), roster_entity: host.roster_entity, connectivity_entity: host.connectivity_entity });
   }
+  const information: Pick<CardConfig, (typeof INFORMATION_OPTIONS)[number]> = {};
+  for (const key of INFORMATION_OPTIONS) if (Object.hasOwn(value, key)) information[key] = value[key] as boolean;
   return {
     type: 'custom:ha-tty7-card', hosts,
     ...(Object.hasOwn(value, 'title') ? { title: (value.title as string).trim() } : {}),
     ...(Object.hasOwn(value, 'appearance') ? { appearance: value.appearance as CardConfig['appearance'] & string } : {}),
     ...(Object.hasOwn(value, 'group_by') ? { group_by: value.group_by as NonNullable<CardConfig['group_by']> } : {}),
-    ...(Object.hasOwn(value, 'show_summary') ? { show_summary: value.show_summary as boolean } : {}),
-    ...(Object.hasOwn(value, 'show_model') ? { show_model: value.show_model as boolean } : {}),
-    ...(Object.hasOwn(value, 'show_effort') ? { show_effort: value.show_effort as boolean } : {}),
-    ...(Object.hasOwn(value, 'show_session_id') ? { show_session_id: value.show_session_id as boolean } : {}),
+    ...information,
     ...(Object.hasOwn(value, 'include_inferred') ? { include_inferred: value.include_inferred as boolean } : {}),
     ...(Object.hasOwn(value, 'statuses') ? { statuses: [...value.statuses as AgentStatus[]] } : {}),
     ...(Object.hasOwn(value, 'agent_types') ? { agent_types: [...value.agent_types as string[]] } : {}),
@@ -104,7 +101,7 @@ export function deriveHostView(config: HostConfig, states: HassStates, connected
     lastContact: null, lastSuccess: null, errorCode: null, lastKnown: true,
     confirmedCounts: { idle: 0, working: 0, waiting: 0, done: 0, unknown: 0 },
     inferredCount: 0, weakCount: 0, unknownOriginCount: 0, inventory: null, inventoryState: 'disabled',
-    inventoryLastContact: null, inventoryLastSuccess: null, inventoryErrorCode: null, source: null };
+    inventoryLastContact: null, inventoryLastSuccess: null, inventoryErrorCode: null };
   const roster = states[config.roster_entity];
   const connectivity = states[config.connectivity_entity];
   if (!roster || !connectivity) return result;
@@ -145,7 +142,6 @@ export function deriveHostView(config: HostConfig, states: HassStates, connected
     ? attrs.inventory_state as HostView['inventoryState'] : attrs.inventory === undefined ? 'disabled' : 'unconfirmed';
   if (result.inventoryState !== 'disabled') result.inventory = parseInventory(attrs.inventory);
   if (!result.inventory && result.inventoryState === 'healthy') result.inventoryState = 'unconfirmed';
-  result.source = parseSource(attrs.source);
   result.inventoryLastContact = typeof attrs.inventory_last_contact === 'string' && Number.isFinite(timestamp(attrs.inventory_last_contact)) ? attrs.inventory_last_contact : null;
   result.inventoryLastSuccess = typeof attrs.inventory_last_success === 'string' && Number.isFinite(timestamp(attrs.inventory_last_success)) ? attrs.inventory_last_success : null;
   result.inventoryErrorCode = ERROR_CODES.includes(attrs.inventory_error_code as ErrorCode) ? attrs.inventory_error_code as ErrorCode : null;

@@ -28,7 +28,8 @@ test('structural inventory keeps detection tab-level and preserves metadata thro
   await page.goto('/?scenario=inventory');
   await page.evaluate(async hosts => {
     const card = document.querySelector('ha-tty7-card')!;
-    card.setConfig({ type: 'custom:ha-tty7-card', hosts, group_by: 'tab', appearance: 'home-assistant' });
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts, group_by: 'tab', appearance: 'home-assistant',
+      statuses: ['idle', 'working', 'waiting', 'done', 'unknown'], show_agent_type: true, show_lifecycle: true, show_effort: true });
     await card.updateComplete;
   }, [hostConfigs[0]!]);
   const card = page.locator('ha-tty7-card');
@@ -45,7 +46,7 @@ test('structural inventory keeps detection tab-level and preserves metadata thro
   await expect(row).toContainText('None applicable');
   await page.evaluate(async hosts => {
     const card = document.querySelector('ha-tty7-card')!;
-    card.setConfig({ type: 'custom:ha-tty7-card', hosts, group_by: 'tab', statuses: ['waiting'] });
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts, group_by: 'tab', statuses: ['waiting'], show_summary: true, show_filtered_count: true });
     await card.updateComplete;
   }, [hostConfigs[0]!]);
   await expect(card.locator('.filtered-count')).toContainText('1 / 5');
@@ -133,7 +134,7 @@ test('native appearance leaves surface styling to ha-card and follows live HA th
       const roster_entity = name === 'Desktop' ? 'sensor.ha_tty7_desktop_demo_roster' : 'sensor.ha_tty7_laptop_demo_roster';
       return { name, roster_entity, connectivity_entity: roster_entity.replace('sensor.', 'binary_sensor.').replace('_roster', '_connectivity') };
     });
-    card.setConfig({ type: 'custom:ha-tty7-card', hosts, appearance: 'home-assistant' });
+    card.setConfig({ type: 'custom:ha-tty7-card', hosts, appearance: 'home-assistant', show_last_contact: true });
     await card.updateComplete;
   });
   const card = page.locator('ha-tty7-card');
@@ -162,8 +163,9 @@ test.describe('HA locale receipt display', () => {
   test.use({ timezoneId: 'America/Los_Angeles', locale: 'en-US' });
   test('reformats both timestamps on profile changes without changing roster data', async ({ page }) => {
     await page.goto('/?scenario=error');
-    await page.evaluate(async () => {
+    await page.evaluate(async hosts => {
       const card = document.querySelector('ha-tty7-card')!;
+      card.setConfig({ type: 'custom:ha-tty7-card', hosts, show_last_contact: true, show_last_success: true });
       const states = card.hass!.states;
       for (const entity of Object.values(states)) {
         if (!entity || !Object.hasOwn(entity.attributes, 'last_contact')) continue;
@@ -175,7 +177,7 @@ test.describe('HA locale receipt display', () => {
         locale: { language: 'en-US', number_format: 'language', time_format: '12', date_format: 'DMY', first_weekday: 'language', time_zone: 'server' },
       } as typeof card.hass;
       await card.updateComplete;
-    });
+    }, hostConfigs);
     const times = page.locator('ha-tty7-card section').first().locator('time');
     await expect(times.nth(0)).toHaveText('15/10/2026, 8:07 AM');
     await expect(times.nth(1)).toHaveText('15/10/2026, 7:06 AM');

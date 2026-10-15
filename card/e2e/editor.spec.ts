@@ -59,3 +59,26 @@ test('host labels remain inert text in editor and card', async ({ page }) => {
   await expect(page.locator('ha-tty7-card').locator('img,script,iframe')).toHaveCount(0);
   expect(await page.evaluate(() => Object.hasOwn(window, '__injected'))).toBe(false);
 });
+
+test('native control consumer settings survive config echoes and filter the live preview', async ({ page }) => {
+  await page.goto('/?editor');
+  const editor = page.locator('ha-tty7-card-editor');
+  const card = page.locator('ha-tty7-card');
+  const saved = page.locator('#saved-config');
+  await expect(card.locator('.metadata, .identity, .summary, .receipt')).toHaveCount(0);
+  await editor.getByRole('checkbox', { name: 'Show model', exact: true }).check();
+  await expect(card.locator('.metadata').first()).toContainText('demo-model');
+  await editor.getByRole('listbox', { name: 'Statuses', exact: true }).selectOption(['unknown']);
+  await expect(card.locator('.agent-row')).toHaveCount(1);
+  await expect(saved).toContainText('"statuses":["unknown"]');
+  await editor.getByRole('listbox', { name: 'Statuses', exact: true }).selectOption(['working']);
+  await editor.getByRole('textbox', { name: 'Agent types: add type', exact: true }).fill('OhMyPi');
+  await editor.getByRole('textbox', { name: 'Agent types: add type', exact: true }).press('Tab');
+  await expect(saved).toContainText('"agent_types":["OhMyPi"]');
+  await expect(card.locator('.agent-row')).toHaveCount(1);
+  const title = editor.getByRole('textbox', { name: 'Card title (default: tty7 agents)' });
+  await title.fill('Compact live preview');
+  await expect(saved).toContainText('"show_model":true');
+  await expect(saved).toContainText('"agent_types":["OhMyPi"]');
+  await expect(title).toBeFocused();
+});

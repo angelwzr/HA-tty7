@@ -2,27 +2,42 @@
 
 Your tty7 agent sessions in Home Assistant. Read-only: no terminal access or remote controls.
 
-> **0.4.0:** update the HA integration first, then the collector. [Release notes](CHANGELOG.md#040---2026-10-15) · [Downloads](https://github.com/angelwzr/HA-tty7/releases/tag/v0.4.0)
+> **0.4.1:** update the HA integration first, then run the reporter installer. [Release notes](CHANGELOG.md#041---2026-10-15) · [Downloads](https://github.com/angelwzr/HA-tty7/releases/tag/v0.4.1)
 
 ## Install
 
 1. Add `https://github.com/angelwzr/HA-tty7` to **HACS → Custom repositories → Integration**. Install and restart HA.
 2. Add **HA-tty7** under **Settings → Devices & services**. Create a host and keep its pairing URL private.
-3. Follow the [Linux collector setup](docs/install.md#linux-collector) on that tty7 host.
+3. Run the [reporter installer](#install-the-host-reporter) in that host's terminal.
 4. Add the **HA-tty7** dashboard card and select your host.
 
 HACS installs the HA side only. Each monitored Linux user/host needs a collector and pairing URL.
+
+### Install the host reporter
+
+Linux with Python 3.11+ and stock tty7:
+
+```sh
+curl --fail --show-error --location --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.1/install.py \
+  --output install-ha-tty7.py
+python3 install-ha-tty7.py
+```
+
+Review the downloaded script before running it. It prompts for the host ID and a **hidden** pairing URL, preserves existing settings, and verifies delivery before starting the user service. No sudo or HA account token. [Installer details](docs/install.md#linux-collector)
 
 ## Display
 
 | Surface | Shows |
 | --- | --- |
-| Card | Status, reported model/effort, optional tab names/grouping and local filters |
+| Card | Host, tab/session title and status by default; extra information is opt-in |
 | Host entities | Provenance-aware counts, health and HA receipt timestamps |
 | Inventory | Optional workspace/tab/pane totals, liveness, hibernation and orphans |
 | Alerts | Optional waiting/completion notifications through HA or Android Companion |
 
 Edit the card title and display options visually. **Home Assistant** appearance follows your theme; date/time follows your HA profile.
+
+Hosts sort by name; unknown-status rows stay hidden unless selected. Diagnostics belong to HA's diagnostic entities/download, not the card. Notification title/message templates are editable under **HA-tty7 → Configure**. [Template fields](docs/install.md#notification-templates)
 
 ## Show tab names
 
@@ -33,7 +48,7 @@ collect_inventory = true
 include_names = true
 ```
 
-Restart only the collector. Choose **Workspace** or **Tab** grouping in the card editor.
+Restart only the collector. The main rows use approved tab names; workspace/tab grouping is optional.
 
 Names are private and off by default. Derived fallback labels need separate consent: `include_derived_labels = true`. They can contain terminal prose or directory names. HA restart retention is another opt-in: **Configure → Retain inventory**.
 
