@@ -96,6 +96,7 @@ def _pairing(data: dict[str, Any]) -> dict[str, str]:
 
 class HATty7ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}

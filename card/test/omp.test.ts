@@ -104,4 +104,32 @@ describe('OMP native source boundary', () => {
     const effort = [...details.querySelectorAll('dt')].find(term => term.textContent === 'Effort')!;
     expect(effort.nextElementSibling!.textContent).toBe('Not reported');
   });
+  it.each(['completed', 'failed', 'cancelled'])('keeps the card healthy for an authoritative terminal %s outcome', outcome => {
+    const view = deriveHostView(host, statesFor(native({
+      status: 'done', omp: { ...ready, background_jobs: 0, outcome, input_id: null },
+    })), true);
+    expect(view.state).toBe('healthy');
+  });
+  it('accepts a real blocking request without treating its opaque identity as display text', async () => {
+    const card = await mount(native({
+      status: 'waiting', omp: { ...ready, outcome: null, input_id: 'opaque-input-identity' },
+    }));
+    expect(card.shadowRoot!.querySelector('.notice')).toBeNull();
+    expect(card.shadowRoot!.querySelector('.agent-row')!.textContent).toContain('Waiting');
+    expect(card.shadowRoot!.textContent).not.toContain('opaque-input-identity');
+  });
+  it.each([
+    { status: 'done', omp: { ...ready, background_jobs: 0, outcome: 'invented', input_id: null } },
+    { status: 'done', omp: { ...ready, background_jobs: 0, outcome: true, input_id: null } },
+    { status: 'working', omp: { ...ready, background_jobs: 0, outcome: 'completed', input_id: null } },
+    { status: 'done', omp: { ...ready, outcome: 'failed', input_id: null } },
+    { status: 'done', omp: { ...ready, background_jobs: 0, outcome: 'completed', input_id: 'still-blocked' } },
+    { status: 'waiting', omp: { ...ready, input_id: '', outcome: null } },
+    { status: 'waiting', omp: { ...ready, input_id: '\ud800', outcome: null } },
+    { status: 'waiting', omp: { ...ready, input_id: 'x'.repeat(129), outcome: null } },
+    { status: 'working', omp: { ...ready, input_id: 'not-blocked', outcome: null } },
+    { status: 'done', omp: { ...ready, run_id: null, background_jobs: 0, outcome: 'completed' } },
+  ])('rejects contradictory or malformed notification proof %j', changes => {
+    expect(deriveHostView(host, statesFor(native(changes)), true).state).toBe('malformed');
+  });
 });

@@ -6,18 +6,19 @@ import re
 from string import Formatter
 from typing import Literal
 
-DEFAULT_TITLE_TEMPLATE = "{host_label}: {event}"
-DEFAULT_MESSAGE_TEMPLATE = "{host_label}: {agent} pane {pane_id} {event}."
+DEFAULT_TITLE_TEMPLATE = "{session_name}"
+DEFAULT_MESSAGE_TEMPLATE = "{event_message}"
 MAX_TEMPLATE_LENGTH = 1024
 TEMPLATE_FIELDS = frozenset({
     "host_label", "host_id", "agent", "pane_id", "session_id", "status", "event",
-    "event_type", "model", "effort", "permission_mode", "tab_name", "workspace_name",
+    "event_type", "event_message", "session_name", "model", "effort", "permission_mode",
+    "tab_name", "workspace_name",
 })
 # A complete grammar, rather than Formatter's field traversal/format language.
 _TEMPLATE = re.compile(r"(?:[^{}]|\{\{|\}\}|\{(?:" + "|".join(sorted(TEMPLATE_FIELDS)) + r")\})*")
 _FORMATTER = Formatter()
 # These fields are fixed enums, a validated host identifier, or a positive integer.
-_PLAIN_FIELDS = frozenset({"host_id", "pane_id", "status", "event", "event_type"})
+_PLAIN_FIELDS = frozenset({"host_id", "pane_id", "status", "event", "event_type", "event_message"})
 
 
 def valid_notification_template(value: object) -> bool:

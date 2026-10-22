@@ -2,7 +2,7 @@
 
 Your tty7 agent sessions in Home Assistant. Read-only: no terminal access or remote controls.
 
-> **0.4.3:** OMP model and thinking level are now reported natively. Update HA first, then the host reporter; restart existing OMP processes once their work is finished. [Release notes](CHANGELOG.md#043---2026-10-15) · [Downloads](https://github.com/angelwzr/HA-tty7/releases/tag/v0.4.3)
+> **0.4.4:** Notifications use your session/tab name and only confirmed finishes, input requests and failures. Old built-in templates migrate automatically; custom templates stay unchanged. Update HA first, then the reporter; restart existing OMP processes after their work finishes. [Release notes](CHANGELOG.md#044---2026-10-22) · [Downloads](https://github.com/angelwzr/HA-tty7/releases/tag/v0.4.4)
 
 ## Install
 
@@ -19,7 +19,7 @@ Linux with Python 3.11+, util-linux `flock` and stock tty7:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.3/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.4/install.py \
   --output install-ha-tty7.py
 python3 install-ha-tty7.py
 ```
@@ -33,7 +33,7 @@ Review the downloaded script before running it. It prompts for the host ID and a
 | Card | Host, tab/session title and status by default; extra information is opt-in |
 | Host entities | Provenance-aware counts, health and HA receipt timestamps |
 | Inventory | Optional workspace/tab/pane totals, liveness, hibernation and orphans |
-| Alerts | Optional waiting/completion notifications through HA or Android Companion |
+| Alerts | Optional confirmed finish/input/failure notifications, titled with the approved session/tab name |
 
 Edit the card title and display options visually. **Home Assistant** appearance follows your theme; date/time follows your HA profile.
 
@@ -43,13 +43,15 @@ Hosts sort by name; unknown-status rows stay hidden unless selected. Diagnostics
 
 **Native OMP reporting is the default for every OhMyPi pane.** The host installer registers one managed extension; there is no per-pane toggle.
 
-- New OMP processes pick it up automatically. In existing OMP 18.10.3 sessions, run `/restart` only after foreground/background work finishes; `/reload-plugins` does not import new extensions.
+- New OMP processes pick it up automatically. In existing sessions, run `/restart` only after foreground/background work finishes; `/reload-plugins` does not import new extension modules.
 - Only the main session owns pane status. Child agents cannot overwrite it; pending continuations/background work keep it Working.
 - Selected model (`provider/id`) and thinking level come directly from OMP's public APIs and refresh on the existing heartbeat. Missing values stay unavailable; no child/tty7 metadata fallback.
 - Missing, stale or conflicting native reports become **Unknown**, with a card warning—not guessed Idle/Done.
-- Completion means the observed main activity ended, not that the entire task succeeded. Each run alerts at most once.
+- Finish/failure alerts require an explicit terminal outcome and no pending work; actual questions/approvals have opaque identities for deduplication. Cancellation, inferred status, retries, child activity and source recovery stay silent. A normal finish does not certify overall task correctness.
 
 This changes HA reporting, not tty7's own GUI hooks. [Setup and source limits](docs/install.md#oh-my-pi-native-status)
+
+Other agents remain visible through stock tty7, but stock-only status changes cannot prove a settled main run or a blocking request and no longer trigger alerts. Old OMP reporters without outcome/input proof stay readable and silent until restarted with the updated extension.
 
 ## Show tab names
 

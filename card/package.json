@@ -1,6 +1,6 @@
 {
   "name": "ha-tty7-card",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "type": "module",
   "engines": {

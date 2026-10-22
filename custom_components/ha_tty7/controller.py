@@ -1,6 +1,7 @@
 """Pure receipt-time health, sanitized restoration and session transitions."""
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import hashlib
 import json
@@ -12,6 +13,45 @@ from .protocol import (
 )
 from .template import DEFAULT_MESSAGE_TEMPLATE, DEFAULT_TITLE_TEMPLATE, TEMPLATE_FIELDS, format_notification
 STATUSES = ("idle", "working", "waiting", "done", "unknown")
+MAX_NATIVE_PANES = 256
+MAX_INPUT_IDENTITIES = 256
+
+
+@dataclass
+class _NativeRun:
+    session: str
+    run: str
+    terminal: bool = False
+    inputs: set[str] = field(default_factory=set)
+
+
+def _authoritative(agent: AgentRecord | None) -> bool:
+    """Recheck alert evidence even for callers bypassing the wire validator."""
+    if agent is None:
+        return False
+    native = agent.get("omp")
+    if (native is None or native.get("state") != "ready" or agent.get("rich") is not True
+            or agent.get("inferred", False) or not agent.get("session_id")
+            or agent.get("agent") != "OhMyPi" or agent.get("activity") is not None
+            or agent.get("turns") is not None
+            or agent["status"] not in ("idle", "working", "waiting", "done")):
+        return False
+    run, outcome, input_id = native.get("run_id"), native.get("outcome"), native.get("input_id")
+    background = native.get("background_jobs")
+    if (type(background) is not int or background < 0
+            or (run is not None and (not isinstance(run, str) or not run))):
+        return False
+    if outcome is not None and (
+        outcome not in ("completed", "failed", "cancelled") or agent["status"] != "done"
+        or run is None or background != 0 or input_id is not None
+    ):
+        return False
+    if input_id is not None:
+        if (not isinstance(input_id, str) or not 1 <= len(input_id) <= 128
+                or any(0xD800 <= ord(char) <= 0xDFFF for char in input_id)
+                or agent["status"] != "waiting" or run is None or outcome is not None):
+            return False
+    return True
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -43,9 +83,8 @@ class HostController:
         self.inventory_last_success: datetime | None = None
         self.inventory_error_code: str | None = None
         self.source: SourceInfo | None = None
-        # One current main-run marker per pane, host-local and never serialized.
-        # Retain markers through missing-source/roster flaps, not event history.
-        self._native_runs: dict[int, tuple[str, str | None, bool]] = {}
+        # One current main run per pane; retain consumed baselines through flaps.
+        self._native_runs: dict[int, _NativeRun] = {}
 
     @property
     def state(self) -> int | str:
@@ -221,33 +260,42 @@ class HostController:
                       if workspace["workspace_id"] == tab["workspace_id"]]
         if len(workspaces) != 1:
             return {}
-        return {"tab_name": tab["name"], "workspace_name": workspaces[0]["name"]}
+        label = tab["label"] if inventory["derived_labels_included"] else None
+        session_name = next((name for name in (tab["name"], label) if name and name.strip()), "Unnamed session")
+        return {"tab_name": tab["name"], "workspace_name": workspaces[0]["name"],
+                "session_name": session_name}
 
     def _native_transition(
         self, agent: AgentRecord, previous: AgentRecord | None, was_ready: bool,
     ) -> str | None:
-        """Consume native done baselines as well as emitted completions."""
-        native = agent.get("omp")
-        if (native is None or native["state"] != "ready" or agent.get("rich") is not True
-                or agent.get("inferred", False) or agent["session_id"] is None):
+        """Consume terminal/input baselines, including suppressed recovery reports."""
+        if not _authoritative(agent):
             return None
+        native = agent["omp"]
         pane, session, run = agent["pane_id"], agent["session_id"], native["run_id"]
+        if run is None:
+            return None
         marker = self._native_runs.get(pane)
-        consumed = marker is not None and marker[:2] == (session, run) and marker[2]
+        if marker is None or (marker.session, marker.run) != (session, run):
+            marker = _NativeRun(session, run)
         prior_native = previous.get("omp") if previous is not None else None
-        same_run = (
-            previous is not None and prior_native is not None and prior_native["state"] == "ready"
-            and previous.get("rich") is True and not previous.get("inferred", False)
-            and previous["session_id"] == session and prior_native["run_id"] == run
-        )
+        same_run = (_authoritative(previous) and previous["session_id"] == session
+                    and prior_native["run_id"] == run)
         kind = None
-        if was_ready and same_run and run is not None:
-            if agent["status"] == "waiting" and previous["status"] in ("idle", "working", "done"):
+        input_id, outcome = native.get("input_id"), native.get("outcome")
+        if was_ready and same_run and not marker.terminal:
+            if (input_id is not None and input_id not in marker.inputs
+                    and len(marker.inputs) < MAX_INPUT_IDENTITIES):
                 kind = "needs_input"
-            elif agent["status"] == "done" and previous["status"] in ("working", "waiting") and not consumed:
-                kind = "completed"
+            elif outcome in ("completed", "failed") and previous["status"] in ("working", "waiting"):
+                kind = outcome
+        if input_id is not None and len(marker.inputs) < MAX_INPUT_IDENTITIES:
+            marker.inputs.add(input_id)
+        # Fail closed once the bounded input history fills; never evict identities
+        # and accidentally replay an old question within this main run.
+        marker.terminal |= agent["status"] == "done"
         self._native_runs.pop(pane, None)
-        self._native_runs[pane] = (session, run, consumed or agent["status"] == "done")
+        self._native_runs[pane] = marker
         return kind
 
     def accept(self, report: Snapshot | ErrorReport, now: datetime) -> list[dict[str, Any]]:
@@ -255,9 +303,6 @@ class HostController:
         self.expire(now)
         was_ready = self.online
         previous_agents = {agent["pane_id"]: agent for agent in self.agents}
-        previous = {(agent["session_id"], agent["pane_id"]):
-                    "unknown" if agent.get("inferred", False) or agent.get("rich") is False else agent["status"]
-                    for agent in self.agents}
         events: list[dict[str, Any]] = []
         self.last_contact = now
         if report["kind"] == "error":
@@ -280,7 +325,7 @@ class HostController:
         self._state = len(self.agents)
         current_native = {agent["pane_id"] for agent in self.agents if "omp" in agent}
         absent = [pane for pane in self._native_runs if pane not in current_native]
-        spare = max(0, 256 - len(current_native))
+        spare = max(0, MAX_NATIVE_PANES - len(current_native))
         for pane in absent[:max(0, len(absent) - spare)]:
             del self._native_runs[pane]
         for agent in self.agents:
@@ -288,19 +333,6 @@ class HostController:
                 kind = self._native_transition(agent, previous_agents.get(agent["pane_id"]), was_ready)
                 if kind is not None:
                     events.append(dict(agent, kind=kind, **self._notification_names(agent["pane_id"])))
-                continue
-            if not was_ready:
-                continue
-            if agent.get("inferred", False) or agent.get("rich") is False:
-                continue
-            prior = previous.get((agent["session_id"], agent["pane_id"]))
-            kind = None
-            if agent["status"] == "waiting" and prior in (None, "idle", "working", "done"):
-                kind = "needs_input"
-            elif agent["status"] == "done" and prior == "working":
-                kind = "completed"
-            if kind is not None:
-                events.append(dict(agent, kind=kind, **self._notification_names(agent["pane_id"])))
         return events
 
 
@@ -311,9 +343,13 @@ def notification_payload(
     """Encode untrusted text for its exact sink; identity does not reveal sessions."""
     identity = json.dumps([event["session_id"], event["pane_id"]], ensure_ascii=False, separators=(",", ":"))
     tag = f"ha_tty7_{host_id}_" + hashlib.sha256(identity.encode()).hexdigest()
-    action = "needs input" if event["kind"] == "needs_input" else "completed"
+    kind = event["kind"]
+    action = "needs input" if kind == "needs_input" else kind
     values = {key: "" if event.get(key) is None else str(event[key]) for key in TEMPLATE_FIELDS}
-    values.update(host_id=host_id, host_label=label, event=action, event_type=event["kind"])
+    values.update(host_id=host_id, host_label=label, event=action, event_type=kind,
+                  session_name=event.get("session_name") or "Unnamed session",
+                  event_message={"completed": "Finished.", "needs_input": "Needs your input.",
+                                 "failed": "Failed."}[kind])
     if event.get("effort") == "":
         values["effort"] = "None"
     title = format_notification(title_template, values, sink="plain")

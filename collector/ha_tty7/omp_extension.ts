@@ -1,4 +1,4 @@
-// Managed by HA-tty7. Public OMP 18.10.3 lifecycle only; no HA credentials.
+// Managed by HA-tty7. Public OMP 18.12.5 lifecycle only; no HA credentials.
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, opendirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -7,7 +7,8 @@ import { dirname, join, parse, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 type Status = "idle" | "working" | "waiting" | "done" | "unknown";
-type Event = { type?: string; willContinue?: boolean; willRetry?: boolean; aborted?: boolean; success?: boolean; toolCallId?: string; toolName?: string; sessionId?: string };
+type Outcome = "completed" | "failed" | "cancelled";
+type Event = { type?: string; messages?: unknown; willContinue?: unknown; awaitingAsyncWork?: unknown; willRetry?: unknown; aborted?: unknown; success?: unknown; toolCallId?: unknown; toolName?: unknown; sessionId?: unknown };
 type PublicContext = Pick<ExtensionContext, "agent"> & Partial<Pick<ExtensionContext, "model" | "isIdle" | "hasPendingMessages" | "getAsyncJobSnapshot">> & { sessionId: () => string };
 interface NativeRecord {
   schema_version: 1;
@@ -18,6 +19,8 @@ interface NativeRecord {
   status: Status;
   run_id: string | null;
   background_jobs: number;
+  outcome?: Outcome | null;
+  input_id?: string | null;
   health: "ready" | "unsupported";
   model?: string | null;
   effort?: string | null;
@@ -26,15 +29,30 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const uid = () => process.getuid!();
 const safeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
-function metadataScalar(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 256 || !value.trim()) return false;
+function identifierScalar(value: unknown, limit = 128): value is string {
+  if (typeof value !== "string" || value.length > limit * 2 || !value.length) return false;
   let count = 0;
   for (let index = 0; index < value.length; index++) {
     const point = value.codePointAt(index)!;
-    if (++count > 128 || (point >= 0xd800 && point <= 0xdfff)) return false;
+    if (++count > limit || (point >= 0xd800 && point <= 0xdfff)) return false;
     if (point > 0xffff) index++;
   }
   return true;
+}
+
+function metadataScalar(value: unknown): value is string {
+  return identifierScalar(value) && !!value.trim();
+}
+
+function terminalOutcome(messages: unknown): Outcome | null {
+  try {
+    if (!Array.isArray(messages) || !messages.length) return null;
+    // Only the final public envelope can prove a terminal turn; never scan history.
+    const message = messages[messages.length - 1];
+    if (!message || typeof message !== "object" || message.role !== "assistant") return null;
+    const reason = message.stopReason;
+    return reason === "stop" ? "completed" : reason === "error" ? "failed" : reason === "aborted" ? "cancelled" : null;
+  } catch { return null; }
 }
 
 function withPublicationLock(directory: string, mode: "--shared" | "--exclusive", mutation: () => void): void {
@@ -88,7 +106,7 @@ function generatedRecord(record: unknown, id: string): record is NativeRecord {
       !("schema_version" in record) || !("reporter_id" in record) || !("pane_id" in record) ||
       !("session_id" in record) || !("updated_at_ms" in record) || !("status" in record) ||
       !("run_id" in record) || !("background_jobs" in record) || !("health" in record)) return false;
-  return Object.keys(record).length === 9 + ("model" in record ? 1 : 0) + ("effort" in record ? 1 : 0) &&
+  return Object.keys(record).length === 9 + ("model" in record ? 1 : 0) + ("effort" in record ? 1 : 0) + ("outcome" in record ? 1 : 0) + ("input_id" in record ? 1 : 0) &&
     record.schema_version === 1 && record.reporter_id === id &&
     safeInteger(record.pane_id) && record.pane_id > 0 &&
     typeof record.session_id === "string" && record.session_id.length > 0 && record.session_id.length <= 128 &&
@@ -97,6 +115,14 @@ function generatedRecord(record: unknown, id: string): record is NativeRecord {
     (record.health === "ready" || record.health === "unsupported") &&
     (!("model" in record) || record.model === null || metadataScalar(record.model)) &&
     (!("effort" in record) || record.effort === null || metadataScalar(record.effort)) &&
+    (!("outcome" in record) || record.outcome === null ||
+      (["completed", "failed", "cancelled"].includes(record.outcome as string) &&
+       record.health === "ready" && record.status === "done" && record.run_id !== null &&
+       record.background_jobs === 0 && (!("input_id" in record) || record.input_id === null))) &&
+    (!("input_id" in record) || record.input_id === null ||
+      (identifierScalar(record.input_id) && record.health === "ready" &&
+       record.status === "waiting" && record.run_id !== null &&
+       (!("outcome" in record) || record.outcome === null))) &&
     (record.run_id === null || (typeof record.run_id === "string" && record.run_id.length > 0 && record.run_id.length <= 128));
 }
 
@@ -141,8 +167,15 @@ export default function haTty7Status(pi: ExtensionAPI): void {
   let continuation = false;
   let retry = false;
   let compacting = false;
+  let active = false;
+  let terminal: Outcome | null = null;
+  let retryUnproven = false;
+  let inputId: string | null = null;
+  let inputKey: string | null = null;
   const asks = new Set<string>();
   const approvals = new Set<string>();
+  // Public tool_call carries the real agent identity; approval callbacks may not.
+  const ownedCalls = new Map<string, string>();
 
   function dispose(): void {
     clearInterval(timer);
@@ -161,13 +194,25 @@ export default function haTty7Status(pi: ExtensionAPI): void {
     context = undefined;
     reporter = undefined;
     run = null; settled = false; continuation = false; retry = false; compacting = false;
-    asks.clear(); approvals.clear();
+    asks.clear(); approvals.clear(); ownedCalls.clear();
+    terminal = null; retryUnproven = false; inputId = null; inputKey = null;
+    active = false;
   }
 
   function busy(): void {
-    if (run === null || settled) run = randomUUID();
+    if (run === null || settled) {
+      run = randomUUID();
+      terminal = null; retryUnproven = false; inputId = null; inputKey = null;
+    }
     settled = false;
   }
+
+  function request(key: string): void {
+    busy();
+    terminal = null;
+    if (inputKey !== key) { inputKey = key; inputId = randomUUID(); }
+  }
+
 
   function sample(): void {
     if (!reporter || !context) return;
@@ -187,7 +232,7 @@ export default function haTty7Status(pi: ExtensionAPI): void {
         jobs = snapshot.running.length;
         delivery = snapshot.delivery.queued > 0 || snapshot.delivery.delivering || snapshot.delivery.pendingJobIds.length > 0;
       }
-      if (!idle || pending || jobs > 0 || delivery || continuation || retry || compacting || asks.size || approvals.size) {
+      if (active || !idle || pending || jobs > 0 || delivery || continuation || retry || compacting || asks.size || approvals.size) {
         busy();
         status = asks.size || approvals.size ? "waiting" : "working";
       } else {
@@ -195,7 +240,7 @@ export default function haTty7Status(pi: ExtensionAPI): void {
         settled = run !== null;
       }
       health = "ready";
-    } catch { jobs = 0; }
+    } catch { jobs = 0; terminal = null; }
     let model: string | null = null;
     let effort: string | null = null;
     try {
@@ -218,6 +263,8 @@ export default function haTty7Status(pi: ExtensionAPI): void {
       session_id: reporter.session, updated_at_ms: Date.now(), status,
       run_id: health === "ready" ? run : null, background_jobs: jobs, health,
       model, effort,
+      outcome: health === "ready" && status === "done" ? terminal : null,
+      input_id: health === "ready" && status === "waiting" ? inputId : null,
     };
     try {
       const owner = reporter;
@@ -260,6 +307,7 @@ export default function haTty7Status(pi: ExtensionAPI): void {
     let session: string;
     try { session = ctx.sessionManager.getSessionId(); } catch { dispose(); return; }
     if (typeof session !== "string" || !session.length || session.length > 128) { dispose(); return; }
+    if (event.sessionId !== undefined && event.sessionId !== session) return;
     if (type === "session_switch" || type === "session_branch" || (reporter && (reporter.session !== session || reporter.pane !== pane))) dispose();
     if (!reporter) {
       try {
@@ -277,16 +325,62 @@ export default function haTty7Status(pi: ExtensionAPI): void {
       getAsyncJobSnapshot: typeof ctx.getAsyncJobSnapshot === "function" ? ctx.getAsyncJobSnapshot.bind(ctx) : undefined,
     };
     switch (type) {
-      case "agent_start": busy(); continuation = false; asks.clear(); approvals.clear(); break;
-      case "agent_end": continuation = event.willContinue === true; asks.clear(); approvals.clear(); break;
-      case "auto_retry_start": busy(); retry = true; break;
-      case "auto_retry_end": retry = false; if (event.success === false) { continuation = false; asks.clear(); approvals.clear(); } break;
-      case "auto_compaction_start": busy(); compacting = true; break;
-      case "auto_compaction_end": compacting = false; continuation = event.willRetry === true && event.aborted !== true; break;
-      case "tool_execution_start": if (event.toolName === "ask" && typeof event.toolCallId === "string") asks.add(event.toolCallId); break;
-      case "tool_execution_end": if (typeof event.toolCallId === "string") { asks.delete(event.toolCallId); approvals.delete(event.toolCallId); } break;
-      case "tool_approval_requested": if (event.sessionId === session && typeof event.toolCallId === "string") approvals.add(event.toolCallId); break;
-      case "tool_approval_resolved": if (event.sessionId === session && typeof event.toolCallId === "string") approvals.delete(event.toolCallId); break;
+      case "agent_start":
+        busy(); active = true; terminal = null; retryUnproven = false;
+        continuation = false; asks.clear(); approvals.clear(); ownedCalls.clear(); inputId = null; inputKey = null; break;
+      case "agent_end": {
+        active = false;
+        const valid = (event.willContinue === undefined || typeof event.willContinue === "boolean") &&
+          (event.awaitingAsyncWork === undefined || typeof event.awaitingAsyncWork === "boolean");
+        continuation = !valid || event.willContinue === true || event.awaitingAsyncWork === true;
+        const outcome = valid && !continuation ? terminalOutcome(event.messages) : null;
+        if (terminal !== "cancelled") terminal = retryUnproven && outcome !== "cancelled" ? null : outcome;
+        asks.clear(); approvals.clear(); ownedCalls.clear(); break;
+      }
+      case "auto_retry_start": busy(); terminal = null; retry = true; break;
+      case "auto_retry_end":
+        retry = false;
+        if (event.success !== true) {
+          // Public success:false conflates cancellation and failure; error text is off limits.
+          retryUnproven = true;
+          if (terminal !== "cancelled") terminal = null;
+          continuation = false; asks.clear(); approvals.clear();
+        }
+        break;
+      case "auto_compaction_start": busy(); terminal = null; compacting = true; break;
+      case "auto_compaction_end":
+        compacting = false;
+        continuation = event.willRetry !== false && event.aborted !== true;
+        if (event.aborted === true) { continuation = false; terminal = "cancelled"; }
+        break;
+      case "tool_call":
+        if (identifierScalar(event.toolCallId, 4096) && metadataScalar(event.toolName) && ownedCalls.size < 256) {
+          ownedCalls.set(event.toolCallId, event.toolName);
+        }
+        return;
+      case "tool_execution_start":
+        if (event.toolName === "ask" && identifierScalar(event.toolCallId, 4096) && ownedCalls.get(event.toolCallId) === "ask") {
+          const key = `ask:${event.toolCallId}`; request(key); asks.add(key);
+        }
+        break;
+      case "tool_execution_end":
+        if (identifierScalar(event.toolCallId, 4096)) {
+          asks.delete(`ask:${event.toolCallId}`); approvals.delete(`approval:${event.toolCallId}`);
+          ownedCalls.delete(event.toolCallId);
+        }
+        break;
+      case "tool_approval_requested":
+        if (event.sessionId === session && identifierScalar(event.toolCallId, 4096)
+            && event.toolName !== undefined && ownedCalls.get(event.toolCallId) === event.toolName) {
+          const key = `approval:${event.toolCallId}`; request(key); approvals.add(key);
+        }
+        break;
+      case "tool_approval_resolved":
+        if (event.sessionId === session && identifierScalar(event.toolCallId, 4096)
+            && event.toolName !== undefined && ownedCalls.get(event.toolCallId) === event.toolName) {
+          approvals.delete(`approval:${event.toolCallId}`);
+        }
+        break;
     }
     sample();
     if (reporter && timer === undefined) {
@@ -305,6 +399,7 @@ export default function haTty7Status(pi: ExtensionAPI): void {
   pi.on("auto_retry_end", (event, ctx) => handle("auto_retry_end", event, ctx));
   pi.on("auto_compaction_start", (event, ctx) => handle("auto_compaction_start", event, ctx));
   pi.on("auto_compaction_end", (event, ctx) => handle("auto_compaction_end", event, ctx));
+  pi.on("tool_call", (event, ctx) => handle("tool_call", event, ctx));
   pi.on("tool_execution_start", (event, ctx) => handle("tool_execution_start", event, ctx));
   pi.on("tool_execution_end", (event, ctx) => handle("tool_execution_end", event, ctx));
   pi.on("tool_approval_requested", (event, ctx) => handle("tool_approval_requested", event, ctx));

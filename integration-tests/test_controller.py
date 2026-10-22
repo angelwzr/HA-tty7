@@ -1,6 +1,10 @@
 """Real controller behavior, without transport or clock mocks."""
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
+from test_omp_controller import native
+
 from custom_components.ha_tty7.controller import HostController, notification_payload
 from custom_components.ha_tty7.protocol import build_error, build_snapshot
 
@@ -16,17 +20,17 @@ def snapshot(controller, agents, seconds=0):
     return controller.accept(build_snapshot(controller.host_id, agents), NOW + timedelta(seconds=seconds))
 
 
-def test_baselines_identity_and_transitions():
+def test_stock_status_baselines_reconcile_without_notification_proof():
     controller = HostController("desktop_demo")
     assert controller.state == "unconfirmed"
     assert snapshot(controller, [agent("done"), agent("waiting", 2)]) == []
     assert snapshot(controller, [agent(), agent("idle", 2)], 1) == []
     events = snapshot(controller, [agent("done"), agent("waiting", 2)], 2)
-    assert [event["kind"] for event in events] == ["completed", "needs_input"]
+    assert events == []
     assert snapshot(controller, [agent("done"), agent("waiting", 2)], 3) == []
     assert snapshot(controller, [agent("done", session="replacement"), agent("unknown", 2)], 4) == []
     assert snapshot(controller, [agent("done", session="replacement"), agent("done", 2)], 5) == []
-    assert [event["kind"] for event in snapshot(controller, [agent("waiting", 3)], 6)] == ["needs_input"]
+    assert snapshot(controller, [agent("waiting", 3)], 6) == []
     assert snapshot(controller, [], 7) == []
     assert controller.state == 0
     assert controller.online
@@ -39,7 +43,7 @@ def test_inferred_completion_does_not_notify_and_retains_provenance():
     assert snapshot(controller, [guessed], 1) == []
     assert controller.attributes["agents"] == [guessed]
     assert snapshot(controller, [agent()], 2) == []
-    assert [event["kind"] for event in snapshot(controller, [agent("done")], 3)] == ["completed"]
+    assert snapshot(controller, [agent("done")], 3) == []
     assert snapshot(controller, [agent() | {"inferred": True}], 4) == []
     assert snapshot(controller, [agent("done")], 5) == []
 
@@ -83,10 +87,12 @@ def test_restore_sanitizes_and_never_restores_confirmation():
 
 def test_sink_encoding_and_session_routing():
     event = agent("waiting", name="`\r\n<a>&[x]") | {"kind": "needs_input"}
-    persistent = notification_payload("desktop_demo", "Desktop", event, "/lovelace/agents", mobile=False)
+    persistent = notification_payload("desktop_demo", "Desktop", event, "/lovelace/agents",
+                                      mobile=False, message_template="{agent}")
     assert "`" * 65 in persistent["message"]
     assert "\r" not in persistent["message"] and "\n" not in persistent["message"]
-    mobile = notification_payload("desktop_demo", "Desktop", event, "/lovelace/agents", mobile=True)
+    mobile = notification_payload("desktop_demo", "Desktop", event, "/lovelace/agents",
+                                  mobile=True, message_template="{agent}")
     assert "&lt;a&gt;&amp;" in mobile["message"]
     assert mobile["data"]["clickAction"] == "/lovelace/agents"
     assert mobile["data"]["tag"] == persistent["notification_id"]
@@ -120,7 +126,7 @@ def test_provenance_counts_are_disjoint_and_weak_completion_is_not_confirmed():
     assert (attrs["inferred_count"], attrs["weak_count"], attrs["unknown_origin_count"]) == (1, 1, 1)
     done = [row | {"status": "done"} for row in rows]
     events = controller.accept({"kind": "snapshot", "agents": done}, NOW + timedelta(seconds=1))
-    assert [event["pane_id"] for event in events] == [1, 4]
+    assert events == []
     controller.accept({"kind": "snapshot", "agents": [agent() | {"rich": False}]}, NOW + timedelta(seconds=2))
     assert controller.accept({"kind": "snapshot", "agents": [agent("done") | {"rich": True}]},
                              NOW + timedelta(seconds=3)) == []
@@ -268,8 +274,8 @@ def test_template_inventory_names_require_fresh_consistent_mutual_unambiguous_jo
     ]
     for name, section, allowed in variants:
         controller = HostController("desktop_demo")
-        controller.accept(build_snapshot("desktop_demo", [agent()], inventory=section), NOW)
-        events = controller.accept(build_snapshot("desktop_demo", [agent("done")], inventory=section),
+        controller.accept(build_snapshot("desktop_demo", [native()], inventory=section), NOW)
+        events = controller.accept(build_snapshot("desktop_demo", [native("done")], inventory=section),
                                    NOW + timedelta(seconds=1))
         assert len(events) == 1, name
         payload = notification_payload("desktop_demo", "Desktop", events[0], "/lovelace/agents",
@@ -278,7 +284,7 @@ def test_template_inventory_names_require_fresh_consistent_mutual_unambiguous_jo
     controller = HostController("desktop_demo")
     section = inventory()
     for second, status in [(0, "working"), (30, "working"), (46, "done")]:
-        events = controller.accept(build_snapshot("desktop_demo", [agent(status)], inventory=section),
+        events = controller.accept(build_snapshot("desktop_demo", [native(status)], inventory=section),
                                    NOW + timedelta(seconds=second))
     assert controller.inventory_state == "stale" and len(events) == 1
     payload = notification_payload("desktop_demo", "Desktop", events[0], "/lovelace/agents",
@@ -289,17 +295,17 @@ def test_template_inventory_names_require_fresh_consistent_mutual_unambiguous_jo
 def test_template_names_withheld_after_inventory_read_error_and_restore():
     for restored in (False, True):
         controller = HostController("desktop_demo")
-        controller.accept(build_snapshot("desktop_demo", [agent()], inventory=inventory()), NOW)
+        controller.accept(build_snapshot("desktop_demo", [native()], inventory=inventory()), NOW)
         if restored:
             replacement = HostController("desktop_demo")
             replacement.restore(controller.restore_attributes(retain_inventory=True), retain_inventory=True)
             controller = replacement
             section = inventory()  # cached pre-restart sample cannot restore confirmation
-            assert controller.accept(build_snapshot("desktop_demo", [agent()], inventory=section),
+            assert controller.accept(build_snapshot("desktop_demo", [native()], inventory=section),
                                      NOW + timedelta(seconds=1)) == []
         else:
             section = {"kind": "error", "error_code": "cli_failed"}
-        events = controller.accept(build_snapshot("desktop_demo", [agent("done")], inventory=section),
+        events = controller.accept(build_snapshot("desktop_demo", [native("done")], inventory=section),
                                    NOW + timedelta(seconds=2))
         payload = notification_payload("desktop_demo", "Desktop", events[0], "/lovelace/agents",
                                        mobile=True, title_template="{workspace_name}|{tab_name}")
@@ -319,3 +325,94 @@ def test_template_sink_escaping_covers_long_backtick_runs_quotes_and_line_breaks
                                    mobile=True, message_template="{model}")
     assert '&lt;a href=&quot;x&quot;&gt;' in mobile["message"]
     assert "<a" not in mobile["message"] and "\n" not in mobile["message"]
+
+
+def test_default_notification_uses_only_the_approved_name_and_terminal_message():
+    event = agent("done", name="PRIVATE_AGENT") | {
+        "kind": "failed", "tab_name": "Project Apollo", "session_name": "Project Apollo",
+    }
+    payload = notification_payload("private_host", "PRIVATE_HOST", event, "/lovelace/agents", mobile=True)
+    assert payload["title"] == "Project Apollo"
+    assert payload["message"] == "Failed."
+    assert payload["data"]["clickAction"] == "/lovelace/agents"
+    assert "PRIVATE" not in payload["title"] + payload["message"]
+
+
+@pytest.mark.parametrize("kind,message", [
+    ("completed", "Finished."), ("needs_input", "Needs your input."), ("failed", "Failed."),
+])
+def test_default_payload_has_safe_fallback_and_exact_approved_message(kind, message):
+    event = agent("done") | {"kind": kind, "tab_name": "not-joined"}
+    for mobile in (False, True):
+        payload = notification_payload("private_host", "PRIVATE_HOST", event, "/lovelace/agents", mobile=mobile)
+        assert payload["title"] == "Unnamed session"
+        assert payload["message"] == (message if mobile else f"{message} [Open agent dashboard](/lovelace/agents)")
+        assert "PRIVATE" not in payload["title"] + payload["message"]
+
+
+@pytest.mark.parametrize("explicit,derived,consent,expected", [
+    ("Private tab", "Approved label", True, "Private tab"),
+    (None, "Approved label", True, "Approved label"),
+    (None, None, True, "Unnamed session"),
+    (None, "Unapproved label", False, "Unnamed session"),
+    ("", "Approved label", True, "Approved label"),
+])
+def test_default_session_name_uses_only_joined_approved_name_or_derived_label(explicit, derived, consent, expected):
+    controller = HostController("desktop_demo")
+    section = inventory()
+    section["tabs"][0].update(name=explicit, label=derived)
+    section["derived_labels_included"] = consent
+    # Defensively test consent at the use boundary, not only wire filtering.
+    controller.accept({"kind": "snapshot", "agents": [native()], "inventory": section}, NOW)
+    events = controller.accept({"kind": "snapshot", "agents": [native("done")], "inventory": section},
+                               NOW + timedelta(seconds=1))
+    payload = notification_payload("desktop_demo", "Desktop", events[0], "/lovelace/agents", mobile=True)
+    assert payload["title"] == expected
+    assert events[0]["tab_name"] == explicit  # custom placeholder never becomes a derived label
+    assert events[0]["workspace_name"] == "Private workspace"
+
+
+@pytest.mark.parametrize("mutation", ["stale", "unconfirmed", "inconsistent", "names-disabled",
+                                      "duplicate-pane", "duplicate-workspace", "ambiguous-tab", "orphan"])
+def test_default_session_name_hides_inventory_names_when_join_is_untrusted(mutation):
+    controller = HostController("desktop_demo")
+    section = inventory()
+    if mutation == "inconsistent":
+        section["consistent"] = False
+    elif mutation == "names-disabled":
+        section["names_included"] = False
+    elif mutation == "duplicate-pane":
+        section["panes"].append(dict(section["panes"][0]))
+    elif mutation == "duplicate-workspace":
+        section["workspaces"].append(dict(section["workspaces"][0]))
+    elif mutation == "ambiguous-tab":
+        section["tabs"].append(section["tabs"][0] | {"tab_id": "other"})
+    elif mutation == "orphan":
+        section["panes"][0]["orphan"] = True
+    controller.accept({"kind": "snapshot", "agents": [native()], "inventory": section}, NOW)
+    if mutation in ("stale", "unconfirmed"):
+        controller.inventory_state = mutation
+    events = controller.accept({"kind": "snapshot", "agents": [native("done")], "inventory": section},
+                               NOW + timedelta(seconds=1))
+    payload = notification_payload("desktop_demo", "Desktop", events[0], "/lovelace/agents", mobile=True)
+    assert payload["title"] == "Unnamed session"
+
+
+def test_custom_failed_event_and_new_fields_keep_sink_escaping_and_literal_braces():
+    event = native("done", outcome="failed") | {"kind": "failed", "session_name": "<b>Session</b>\nnext"}
+    payload = notification_payload(
+        "desktop_demo", "Desktop", event, "/dashboard/agents", mobile=True,
+        title_template="{{name}} {session_name}", message_template="{event}|{event_type}|{event_message}|{session_name}")
+    assert payload["title"] == "{name} <b>Session</b> next"
+    assert payload["message"] == "failed|failed|Failed.|&lt;b&gt;Session&lt;/b&gt; next"
+
+
+def test_blank_approved_names_use_the_safe_session_fallback():
+    controller = HostController("desktop_demo")
+    section = inventory()
+    section["tabs"][0].update(name=" \n ", label=" \t ")
+    controller.accept({"kind": "snapshot", "agents": [native()], "inventory": section}, NOW)
+    event, = controller.accept({"kind": "snapshot", "agents": [native("done")], "inventory": section},
+                               NOW + timedelta(seconds=1))
+    payload = notification_payload("desktop_demo", "Desktop", event, "/lovelace/agents", mobile=True)
+    assert payload["title"] == "Unnamed session"

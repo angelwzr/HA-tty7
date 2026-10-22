@@ -5,6 +5,8 @@ export interface OmpSource {
   state: (typeof OMP_STATES)[number];
   run_id: string | null;
   background_jobs: number | null;
+  outcome?: 'completed' | 'failed' | 'cancelled' | null;
+  input_id?: string | null;
 }
 export const DEFAULT_STATUSES: readonly AgentStatus[] = ['idle', 'working', 'waiting', 'done'];
 export const INFORMATION_OPTIONS = [

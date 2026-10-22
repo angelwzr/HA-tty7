@@ -13,6 +13,7 @@ from typing import Literal, NotRequired, TypedDict, cast
 
 Status = Literal["idle", "working", "waiting", "done", "unknown"]
 OmpState = Literal["ready", "missing", "stale", "invalid", "conflict", "unsupported"]
+OmpOutcome = Literal["completed", "failed", "cancelled"]
 ErrorCode = Literal[
     "cli_unavailable", "cli_timeout", "cli_failed", "invalid_payload", "payload_too_large"
 ]
@@ -42,6 +43,8 @@ class OmpStatus(TypedDict):
     state: OmpState
     run_id: str | None
     background_jobs: int | None
+    outcome: NotRequired[OmpOutcome | None]
+    input_id: NotRequired[str | None]
 
 
 class AgentRecord(TypedDict):
@@ -223,7 +226,10 @@ def _record_fields(
 
 
 def _omp_status(value: object, record: AgentRecord) -> OmpStatus:
-    data = _object(value, {"state", "run_id", "background_jobs"})
+    fields = {"state", "run_id", "background_jobs"}
+    if not isinstance(value, dict) or not fields <= value.keys() <= fields | {"outcome", "input_id"}:
+        raise PayloadError()
+    data = value
     state = data["state"]
     if not isinstance(state, str) or state not in _OMP_STATES:
         raise PayloadError()
@@ -232,6 +238,22 @@ def _omp_status(value: object, record: AgentRecord) -> OmpStatus:
         run_id=_text(data["run_id"], 128, nullable=True),
         background_jobs=_integer(data["background_jobs"], nullable=True),
     )
+    outcome = data.get("outcome")
+    input_id = _text(data.get("input_id"), 128, nullable=True)
+    if outcome is not None and (not isinstance(outcome, str) or outcome not in {"completed", "failed", "cancelled"}):
+        raise PayloadError()
+    if "outcome" in data:
+        result["outcome"] = cast(OmpOutcome | None, outcome)
+    if "input_id" in data:
+        result["input_id"] = input_id
+    if outcome is not None and (
+            state != "ready" or record["status"] != "done" or result["run_id"] is None
+            or result["background_jobs"] != 0 or input_id is not None):
+        raise PayloadError()
+    if input_id is not None and (
+            state != "ready" or record["status"] != "waiting" or result["run_id"] is None
+            or outcome is not None):
+        raise PayloadError()
     if (record["agent"] != "OhMyPi" or record["activity"] is not None
             or record["turns"] is not None or record.get("inferred", False)):
         raise PayloadError()

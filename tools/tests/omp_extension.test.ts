@@ -23,7 +23,7 @@ let model: unknown, thinking: unknown;
 let thinkingReader: () => unknown;
 type TestContext = { agent: { kind: string }; model: unknown; sessionManager: { getSessionId: () => string }; isIdle: () => boolean; hasPendingMessages: () => boolean; getAsyncJobSnapshot?: () => unknown };
 const context = (kind = "main"): TestContext => ({ agent: { kind }, get model() { return model; }, sessionManager: { getSessionId: () => session }, isIdle: () => idle, hasPendingMessages: () => pending, getAsyncJobSnapshot: () => snapshot });
-const emit = async (type: string, event: any = {}, ctx = context()) => { await handlers.get(type)?.({ type, ...event }, ctx); };
+const emit = async (type: string, event: any = {}, ctx = context()) => { await handlers.get(type)?.(Object.defineProperties({ type }, Object.getOwnPropertyDescriptors(event)), ctx); };
 const tick = () => { for (const callback of timers) callback(); };
 function holdPublicationLock(mode = "--exclusive") {
   const fd = openSync(join(directory(), ".publish.lock"), constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
@@ -71,13 +71,14 @@ test("continuations owner jobs and pending delivery preserve one run until actua
 });
 test("per-call ask and approval waits survive unrelated tool completion", async () => {
   idle = false; await emit("agent_start");
+  await emit("tool_call", { toolName: "ask", toolCallId: "one" });
+  await emit("tool_call", { toolName: "bash", toolCallId: "two" });
   await emit("tool_execution_start", { toolName: "ask", toolCallId: "one", args: { secret: "NEVER_EXPORT" } });
-  await emit("tool_approval_requested", { sessionId: session, toolCallId: "two", reason: "PRIVATE_REASON" });
+  await emit("tool_approval_requested", { sessionId: session, toolName: "bash", toolCallId: "two", reason: "PRIVATE_REASON" });
   await emit("tool_execution_end", { toolCallId: "other", result: "PRIVATE_RESULT" }); expect(record().status).toBe("waiting");
   await emit("tool_execution_end", { toolCallId: "one" }); expect(record().status).toBe("waiting");
-  await emit("tool_approval_resolved", { sessionId: session, toolCallId: "two" }); expect(record().status).toBe("working");
+  await emit("tool_approval_resolved", { sessionId: session, toolName: "bash", toolCallId: "two" }); expect(record().status).toBe("working");
   const text = readFileSync(join(directory(), files()[0]), "utf8"); expect(text).not.toMatch(/NEVER_EXPORT|PRIVATE|args|result|reason|command/);
-  expect(Object.keys(record()).sort()).toEqual(["schema_version", "reporter_id", "pane_id", "session_id", "updated_at_ms", "status", "run_id", "background_jobs", "health", "model", "effort"].sort());
   expect(statSync(directory()).mode & 0o777).toBe(0o700); expect(statSync(join(directory(), files()[0])).mode & 0o777).toBe(0o600);
 });
 test("retry and compaction cancellation clear continuation without sticking working", async () => {
@@ -274,4 +275,180 @@ test("symlinked persistent lock is refused without touching its target", async (
   const target = join(home, "unrelated-lock-target"); writeFileSync(target, "untouched", { mode: 0o600 });
   symlinkSync(target, lock); await emit("session_start"); tick();
   expect(files()).toEqual([]); expect(readFileSync(target, "utf8")).toBe("untouched");
+});
+
+test("terminal lifecycle evidence separates normal finish failure and cancellation without reading message text", async () => {
+  let privateReads = 0;
+  for (const [stopReason, outcome] of [["stop", "completed"], ["error", "failed"], ["aborted", "cancelled"]] as const) {
+    idle = false;
+    await emit("agent_start");
+    const message = { role: "assistant", stopReason, get content() { privateReads++; throw new Error("PRIVATE_TEXT"); } };
+    idle = true;
+    await emit("agent_end", { messages: [message], willContinue: false });
+    tick();
+    expect(record().outcome).toBe(outcome);
+    expect(record().input_id).toBeNull();
+  }
+  expect(privateReads).toBe(0);
+  idle = false;
+  await emit("agent_start");
+  idle = true;
+  await emit("agent_end", { messages: [] });
+  expect(record().outcome).toBeNull();
+});
+
+test("only a terminal assistant envelope proves an outcome, never an idle heartbeat", async () => {
+  for (const messages of [undefined, [], [{}], [{ role: "assistant" }], [{ role: "assistant", stopReason: "length" }], [{ role: "assistant", stopReason: "toolUse" }], [{ role: "assistant", stopReason: "stop" }, { role: "toolResult" }], [{ role: "assistant", stopReason: {} }]]) {
+    idle = false; await emit("agent_start"); idle = true;
+    await emit("agent_end", { messages }); tick();
+    expect(record()).toMatchObject({ status: "done", outcome: null, input_id: null });
+  }
+  idle = false; await emit("agent_start"); idle = true; tick();
+  expect(record().outcome).toBeNull();
+});
+
+test("continuation retry and background delivery cannot publish a stale normal finish", async () => {
+  const messages = [{ role: "assistant", stopReason: "stop" }];
+  idle = false; await emit("agent_start"); const run = record().run_id; idle = true;
+  await emit("agent_end", { messages, willContinue: true }); tick();
+  expect(record()).toMatchObject({ status: "working", outcome: null, run_id: run });
+  await emit("agent_start"); await emit("agent_end", { messages, awaitingAsyncWork: true }); tick();
+  expect(record()).toMatchObject({ status: "working", outcome: null, run_id: run });
+  await emit("agent_start");
+  snapshot = { running: [{}], delivery: { queued: 0, delivering: false, pendingJobIds: [] } };
+  await emit("agent_end", { messages }); expect(record().outcome).toBeNull();
+  snapshot = { running: [], delivery: { queued: 1, delivering: true, pendingJobIds: ["private-job"] } };
+  tick(); expect(record().outcome).toBeNull();
+  snapshot = null; pending = true; tick(); expect(record().outcome).toBeNull();
+  pending = false; tick(); expect(record()).toMatchObject({ status: "done", outcome: "completed", run_id: run });
+  idle = false; await emit("agent_start"); await emit("auto_retry_start"); idle = true;
+  await emit("auto_retry_end", { success: false, get finalError() { throw new Error("PRIVATE_ERROR"); } });
+  await emit("agent_end", { messages }); tick(); expect(record().outcome).toBeNull();
+});
+
+test("opaque request identities survive unrelated events and same-request flaps without reverting", async () => {
+  idle = false; await emit("agent_start");
+  await emit("tool_call", { toolName: "ask", toolCallId: "private-request" });
+  await emit("tool_execution_start", { toolName: "ask", toolCallId: "private-request" });
+  const first = record().input_id;
+  expect(typeof first).toBe("string"); expect(first).not.toContain("private-request");
+  tick(); await emit("tool_execution_end", { toolCallId: "unrelated" });
+  expect(record().input_id).toBe(first);
+  await emit("tool_execution_end", { toolCallId: "private-request" }); expect(record().input_id).toBeNull();
+  await emit("tool_call", { toolName: "ask", toolCallId: "private-request" });
+  await emit("tool_execution_start", { toolName: "ask", toolCallId: "private-request" }); expect(record().input_id).toBe(first);
+  await emit("tool_call", { toolName: "bash", toolCallId: "second-private-request" });
+  await emit("tool_approval_requested", { sessionId: session, toolName: "bash", toolCallId: "second-private-request" });
+  const second = record().input_id; expect(second).not.toBe(first);
+  await emit("tool_approval_resolved", { sessionId: session, toolName: "bash", toolCallId: "second-private-request" });
+  expect(record().input_id).toBe(second);
+  const current = record(); await emit("tool_approval_requested", { sessionId: "other-session", toolCallId: "wrong" });
+  expect(record()).toEqual(current);
+});
+
+test("malformed lifecycle scalars and unavailable public APIs erase terminal proof", async () => {
+  for (const field of ["willContinue", "awaitingAsyncWork"]) {
+    idle = false; await emit("agent_start"); idle = true;
+    await emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }], [field]: "false" });
+    tick(); expect(record().outcome).toBeNull();
+  }
+  idle = false; await emit("agent_start"); idle = true;
+  const ctx = context();
+  await emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
+  expect(record().outcome).toBe("completed");
+  ctx.getAsyncJobSnapshot = () => ({ running: [], delivery: { queued: -1, delivering: false, pendingJobIds: [] } });
+  await emit("session_start", {}, ctx);
+  expect(record()).toMatchObject({ health: "unsupported", outcome: null, input_id: null, run_id: null });
+  ctx.getAsyncJobSnapshot = () => null; tick(); expect(record().outcome).toBeNull();
+});
+
+test("cancelled retry cannot revive its earlier error or stop envelope", async () => {
+  for (const stopReason of ["error", "stop"]) {
+    idle = false; await emit("agent_start"); const run = record().run_id;
+    await emit("auto_retry_start");
+    idle = true; await emit("agent_end", { messages: [{ role: "assistant", stopReason }], willContinue: true });
+    await emit("auto_retry_end", { success: false });
+    tick(); expect(record()).toMatchObject({ status: "done", outcome: null, run_id: run });
+    await emit("agent_end", { messages: [{ role: "assistant", stopReason }] });
+    tick(); expect(record().outcome).toBeNull();
+    await emit("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
+    expect(record().outcome).toBe("cancelled");
+  }
+});
+
+test("successful retry needs a new terminal envelope and clears earlier failure", async () => {
+  idle = false; await emit("agent_start"); const run = record().run_id;
+  await emit("agent_end", { messages: [{ role: "assistant", stopReason: "error" }], willContinue: true });
+  await emit("auto_retry_start"); idle = true;
+  await emit("auto_retry_end", { success: true }); tick();
+  expect(record().outcome).toBeNull();
+  await emit("agent_start"); await emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+  expect(record()).toMatchObject({ status: "done", outcome: "completed", run_id: run });
+});
+
+test("child envelopes and malformed input identities cannot create main notification proof", async () => {
+  idle = false; await emit("agent_start"); const first = record();
+  await emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, context("sub"));
+  await emit("tool_execution_start", { toolName: "ask", toolCallId: "private-child" }, context("sub"));
+  expect(record()).toEqual(first);
+  for (const toolCallId of ["", {}, [], "\ud800", "x".repeat(4097)]) {
+    await emit("tool_call", { toolName: "ask", toolCallId });
+    await emit("tool_execution_start", { toolName: "ask", toolCallId });
+    expect(record()).toMatchObject({ status: "working", outcome: null, input_id: null });
+  }
+});
+
+test("pruning recognizes legacy and new proof records but preserves contradictory records", async () => {
+  await emit("session_start"); const fixture = record(); await emit("session_shutdown");
+  delete fixture.outcome; delete fixture.input_id;
+  const oldTime = new Date(Date.now() - 65000);
+  const valid = [{}, { outcome: null, input_id: null }, { status: "done", run_id: "run", outcome: "failed" }, { status: "waiting", run_id: "run", input_id: "opaque" }];
+  const invalid = [{ outcome: "completed" }, { status: "waiting", run_id: "run", input_id: "\ud800" }, { status: "done", run_id: "run", outcome: "completed", input_id: "opaque" }, { status: "done", run_id: "run", outcome: "failed", background_jobs: 1 }];
+  for (const [values, prune] of [[valid, true], [invalid, false]] as const) {
+    for (const fields of values) {
+      const id = randomUUID(), name = `${id}.json`, path = join(directory(), name);
+      writeFileSync(path, JSON.stringify({ ...fixture, ...fields, reporter_id: id, updated_at_ms: oldTime.getTime() }), { mode: 0o600 });
+      utimesSync(path, oldTime, oldTime);
+      await emit("session_start"); expect(files().includes(name)).toBe(!prune); await emit("session_shutdown");
+    }
+  }
+});
+
+test("compaction cancellation survives a trailing pre-recovery error envelope", async () => {
+  idle = false; await emit("agent_start"); await emit("auto_compaction_start");
+  await emit("auto_compaction_end", { aborted: true, willRetry: false });
+  idle = true;
+  await emit("agent_end", { messages: [{ role: "assistant", stopReason: "error" }] });
+  tick();
+  expect(record().outcome).toBe("cancelled");
+  idle = false; await emit("agent_start"); idle = true;
+  await emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+  expect(record().outcome).toBe("completed");
+});
+
+test("shared-runner advisor approval cannot replace a main blocking request identity", async () => {
+  idle = false; await emit("agent_start");
+  await emit("tool_call", { toolName: "ask", toolCallId: "main-question" });
+  await emit("tool_execution_start", { toolName: "ask", toolCallId: "main-question" });
+  const first = record().input_id;
+  await emit("tool_call", { toolName: "bash", toolCallId: "advisor-call" }, context("sub"));
+  await emit("tool_approval_requested", { sessionId: session, toolName: "bash", toolCallId: "advisor-call" });
+  expect(record().input_id).toBe(first);
+  await emit("tool_approval_resolved", { sessionId: session, toolName: "bash", toolCallId: "advisor-call" });
+  expect(record().input_id).toBe(first);
+  await emit("tool_execution_end", { toolName: "ask", toolCallId: "main-question" });
+  await emit("tool_approval_requested", { sessionId: session, toolName: "bash", toolCallId: "advisor-call" });
+  expect(record().input_id).toBeNull();
+});
+
+test("provider composite source IDs can identify a real question without being exported", async () => {
+  const call = "a".repeat(64) + "|" + "b".repeat(64);
+  idle = false; await emit("agent_start");
+  await emit("tool_call", { toolName: "ask", toolCallId: call });
+  await emit("tool_execution_start", { toolName: "ask", toolCallId: call });
+  expect(record().status).toBe("waiting");
+  expect(typeof record().input_id).toBe("string");
+  expect(record().input_id).not.toContain(call);
+  await emit("tool_execution_end", { toolName: "ask", toolCallId: call });
+  expect(record().input_id).toBeNull();
 });

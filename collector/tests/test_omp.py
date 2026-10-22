@@ -45,7 +45,8 @@ def ready_row():
         "pane_id": 7, "agent": "OhMyPi", "session_id": "real-main", "status": "working",
         "activity": None, "turns": None, "model": "openai/native-main", "effort": "low",
         "permission_mode": "ask", "rich": True,
-        "omp": {"state": "ready", "run_id": "run-1", "background_jobs": 2},
+        "omp": {"state": "ready", "run_id": "run-1", "background_jobs": 2,
+                "outcome": None, "input_id": None},
     }
 
 
@@ -94,7 +95,45 @@ class NativeCollectorTests(unittest.TestCase):
         self.assertIsNone(row["effort"])
         self.assertIs(row["rich"], False)
         self.assertNotIn("inferred", row)
-        self.assertEqual(row["omp"], {"state": state, "run_id": None, "background_jobs": None})
+        self.assertEqual(row["omp"], {"state": state, "run_id": None, "background_jobs": None,
+                                     "outcome": None, "input_id": None})
+
+    def test_notification_proof_roundtrips_and_unavailable_overlay_clears_it(self):
+        for outcome in ("completed", "failed", "cancelled"):
+            self.write_record(native(status="done", background_jobs=0, outcome=outcome, input_id=None))
+            row = self.overlay()[0]
+            self.assertEqual(row["omp"]["outcome"], outcome)
+            self.assertIsNone(row["omp"]["input_id"])
+            self.assertEqual(decode_report(encode_report(build_snapshot("host", [row])), "host")["agents"], [row])
+        self.write_record(native(status="waiting", input_id="opaque-request", outcome=None))
+        self.assertEqual(self.overlay()[0]["omp"]["input_id"], "opaque-request")
+        self.assert_unavailable(self.overlay(now=NOW + 10001)[0], "stale")
+
+    def test_legacy_done_record_remains_readable_without_notification_proof(self):
+        self.write_record(native(status="done", background_jobs=0))
+        row = self.overlay()[0]
+        self.assertEqual(row["status"], "done")
+        self.assertIsNone(row["omp"]["outcome"])
+        self.assertIsNone(row["omp"]["input_id"])
+        self.assertEqual(decode_report(encode_report(build_snapshot("host", [row])), "host")["agents"], [row])
+
+    def test_native_notification_proof_rejects_contradictory_or_untrusted_fields(self):
+        for fields in (
+            {"outcome": "completed"}, {"outcome": "failed", "status": "waiting"},
+            {"outcome": "cancelled", "status": "done", "background_jobs": 1},
+            {"outcome": "completed", "status": "done", "background_jobs": 0, "run_id": None},
+            {"outcome": "completed", "status": "done", "background_jobs": 0, "input_id": "request"},
+            {"outcome": []}, {"outcome": "error"}, {"input_id": "request"},
+            {"status": "waiting", "input_id": ""},
+            {"status": "waiting", "input_id": "\ud800"},
+            {"status": "waiting", "input_id": "x" * 129},
+            {"status": "waiting", "input_id": {"private": "value"}},
+            {"status": "waiting", "input_id": "request", "run_id": None},
+            {"status": "waiting", "input_id": "request", "health": "unsupported"},
+        ):
+            with self.subTest(fields=fields):
+                self.write_record(native(**fields))
+                self.assert_unavailable(self.overlay()[0], "invalid")
 
     def test_default_missing_native_source_never_uses_stock_child_state(self):
         self.directory.rmdir()
@@ -133,7 +172,7 @@ class NativeCollectorTests(unittest.TestCase):
                 row = report["agents"][0]
                 self.assertEqual((row["model"], row["effort"]), expected)
                 self.assertEqual((row["session_id"], row["status"], row["omp"]),
-                    ("real-main", "working", {"state": "ready", "run_id": "run-1", "background_jobs": 2}))
+                    ("real-main", "working", ready_row()["omp"]))
                 body = encode_report(report)
                 self.assertEqual(decode_report(body, "host"), report)
                 for excluded in (b"wrong-stock-child", REPORTER.encode(), b"updated_at_ms", b"reporter_id"):
@@ -152,7 +191,7 @@ class NativeCollectorTests(unittest.TestCase):
                 row = collect_report(self.config, sampler=sampler, now=poll)["agents"][0]
                 self.assertEqual((row["model"], row["effort"]), (fields["model"], fields["effort"]))
                 self.assertEqual((row["session_id"], row["status"], row["omp"]),
-                    ("real-main", "working", {"state": "ready", "run_id": "run-1", "background_jobs": 2}))
+                    ("real-main", "working", ready_row()["omp"]))
 
     def test_native_metadata_accepts_utf8_codepoint_boundary_and_literal_off(self):
         self.write_record(native(model="界" * 128, effort="off"))
@@ -440,6 +479,38 @@ class NativeWireTests(unittest.TestCase):
             unavailable = row | {"session_id": None, "status": "unknown", "rich": False,
                 "omp": {"state": state, "run_id": None, "background_jobs": None}}
             self.assertEqual(build_snapshot("host", [unavailable])["agents"], [unavailable])
+
+    def test_notification_fields_are_optional_bounded_and_consistent(self):
+        for fields, status in (
+            ({}, "done"), ({"outcome": None, "input_id": None}, "done"),
+            ({"outcome": "completed", "input_id": None}, "done"),
+            ({"outcome": "failed"}, "done"), ({"outcome": "cancelled"}, "done"),
+            ({"input_id": "😀" * 128}, "waiting"),
+        ):
+            row = ready_row() | {"status": status}
+            row["omp"] = {key: value for key, value in row["omp"].items()
+                          if key not in {"outcome", "input_id"}} | {"background_jobs": 0} | fields
+            self.assertEqual(decode_report(encode_report(build_snapshot("host", [row])), "host")["agents"], [row])
+        base = ready_row() | {"status": "done"}
+        base["omp"] = base["omp"] | {"background_jobs": 0}
+        for fields in (
+            {"outcome": {}}, {"outcome": "error"}, {"outcome": True},
+            {"outcome": "completed", "input_id": "request"},
+            {"outcome": "completed", "run_id": None},
+            {"outcome": "completed", "background_jobs": 1},
+            {"input_id": "request"}, {"input_id": ""}, {"input_id": "\ud800"},
+            {"input_id": "x" * 129}, {"input_id": ["request"]},
+        ):
+            with self.subTest(fields=fields), self.assertRaises(PayloadError):
+                build_snapshot("host", [base | {"omp": base["omp"] | fields}])
+        for status in ("idle", "working", "waiting", "unknown"):
+            with self.subTest(status=status), self.assertRaises(PayloadError):
+                build_snapshot("host", [base | {"status": status, "omp": base["omp"] | {"outcome": "completed"}}])
+        for state in ("missing", "stale", "invalid", "conflict", "unsupported"):
+            row = base | {"session_id": None, "status": "unknown", "rich": False,
+                          "omp": {"state": state, "run_id": None, "background_jobs": None, "outcome": "completed"}}
+            with self.subTest(state=state), self.assertRaises(PayloadError):
+                build_snapshot("host", [row])
 
     def test_native_wire_rejects_invalid_invariants_other_agents_and_private_fields(self):
         row = ready_row()

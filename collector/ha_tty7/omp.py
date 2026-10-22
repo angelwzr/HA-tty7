@@ -12,7 +12,7 @@ import time
 from typing import cast
 from uuid import UUID
 
-from .protocol import AgentRecord, MAX_AGENTS, MAX_SAFE_INTEGER, OmpState, OmpStatus, Status
+from .protocol import AgentRecord, MAX_AGENTS, MAX_SAFE_INTEGER, OmpOutcome, OmpState, OmpStatus, Status
 
 _MAX_RECORD_BYTES = 4096
 _MAX_DIRECTORY_ENTRIES = 1024
@@ -22,7 +22,7 @@ _REQUIRED_FIELDS = frozenset({
     "schema_version", "reporter_id", "pane_id", "session_id", "updated_at_ms",
     "status", "run_id", "background_jobs", "health",
 })
-_FIELDS = _REQUIRED_FIELDS | {"model", "effort"}
+_FIELDS = _REQUIRED_FIELDS | {"model", "effort", "outcome", "input_id"}
 _STATUSES = frozenset({"idle", "working", "waiting", "done", "unknown"})
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -39,6 +39,8 @@ class _NativeRecord:
     health: str
     model: str | None
     effort: str | None
+    outcome: OmpOutcome | None
+    input_id: str | None
 
 
 def _integer(value: object, *, positive: bool = False) -> int:
@@ -83,16 +85,29 @@ def _parse(body: bytes, reporter_id: str) -> _NativeRecord:
     if (not isinstance(status, str) or status not in _STATUSES
             or not isinstance(health, str) or health not in {"ready", "unsupported"}):
         raise ValueError("invalid native record")
+    run_id = None if data["run_id"] is None else _identifier(data["run_id"])
+    background_jobs = _integer(data["background_jobs"])
+    outcome = data.get("outcome")
+    input_id = None if data.get("input_id") is None else _identifier(data["input_id"])
+    if outcome is not None and (
+            not isinstance(outcome, str) or outcome not in {"completed", "failed", "cancelled"}
+            or health != "ready" or status != "done" or run_id is None
+            or background_jobs != 0 or input_id is not None):
+        raise ValueError("invalid native record")
+    if input_id is not None and (health != "ready" or status != "waiting" or run_id is None):
+        raise ValueError("invalid native record")
     return _NativeRecord(
         pane_id=_integer(data["pane_id"], positive=True),
         session_id=_identifier(data["session_id"]),
         updated_at_ms=_integer(data["updated_at_ms"]),
         status=cast(Status, status),
-        run_id=None if data["run_id"] is None else _identifier(data["run_id"]),
-        background_jobs=_integer(data["background_jobs"]),
+        run_id=run_id,
+        background_jobs=background_jobs,
         health=health,
         model=_metadata(data.get("model")),
         effort=_metadata(data.get("effort")),
+        outcome=cast(OmpOutcome | None, outcome),
+        input_id=input_id,
     )
 
 
@@ -225,12 +240,14 @@ def _overlay(row: AgentRecord, state: OmpState, native: _NativeRecord | None) ->
     result.pop("inferred", None)
     result.update(session_id=None, status="unknown", activity=None, turns=None,
                   model=None, effort=None, rich=False)
-    result["omp"] = OmpStatus(state=state, run_id=None, background_jobs=None)
+    result["omp"] = OmpStatus(state=state, run_id=None, background_jobs=None,
+                              outcome=None, input_id=None)
     if state == "ready" and native is not None:
         result.update(session_id=native.session_id, status=native.status,
                       model=native.model, effort=native.effort, rich=True)
         result["omp"] = OmpStatus(state="ready", run_id=native.run_id,
-                                  background_jobs=native.background_jobs)
+                                  background_jobs=native.background_jobs,
+                                  outcome=native.outcome, input_id=native.input_id)
     return result
 
 

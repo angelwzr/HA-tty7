@@ -4,6 +4,31 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-22
+
+### Changed
+
+- Default notifications use the approved session/tab name, falling back to `Unnamed session`, without host, agent type, pane number or session ID.
+- Messages are `Finished.`, `Needs your input.`, and `Failed.`. Existing exact built-in templates migrate automatically and independently; custom templates, routes and disabled toggles are preserved.
+- Only authoritative main-run outcomes and actual blocking questions/approvals can notify. Stock-only and older proof-less native reports remain visible but silent.
+
+### Fixed
+
+- Cancellation, unknown outcomes, child/advisor activity, retries, compaction and reconnects no longer masquerade as normal finishes or new input requests.
+- Native terminal proof waits for owner quiescence; repeated finish/failure/input events are deduplicated without startup or recovery replay.
+- Cancelled compaction remains cancelled through trailing pre-recovery errors. Main-call ownership and provider-composite tool IDs are handled without exporting source correlation IDs.
+
+### Security
+
+- Only bounded scalar outcome and opaque input identity metadata are added. Message content, error text, tool arguments/results and credentials remain excluded.
+- Name collection and derived-label consent are unchanged; unsafe or unavailable names cannot fall back to host/agent/ID text.
+
+### Upgrade requirements
+
+- Update/restart HA first, then run the 0.4.4 reporter installer. Existing OMP sessions require `/restart` after foreground/background work finishes; no active session is restarted automatically.
+- Native reporters without outcome/input proof and stock-only agent statuses cannot trigger notifications. OMP's public failed-or-cancelled retry ambiguity remains silent rather than guessing.
+
+
 ## [0.4.3] - 2026-10-15
 
 ### Fixed
@@ -154,7 +179,8 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 - Bundled card, visual editor and automatic frontend loading.
 - Host-bound HTTPS ingestion, freshness handling, restoration and optional notifications.
 
-[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/angelwzr/HA-tty7/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/angelwzr/HA-tty7/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/angelwzr/HA-tty7/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/angelwzr/HA-tty7/compare/v0.4.0...v0.4.1

@@ -36,6 +36,14 @@ def record(status="working", pane=1, session="synthetic-session", name="codex"):
                 activity=None, turns=None, model=None, effort=None, permission_mode=None)
 
 
+def native_record(status="working", *, run="synthetic-run", outcome="completed", input_id="synthetic-request",
+                  pane=1, session="synthetic-session", **metadata):
+    return record(status, pane, session, "OhMyPi") | dict(
+        rich=True, omp=dict(state="ready", run_id=run, background_jobs=0,
+                            outcome=outcome if status == "done" else None,
+                            input_id=input_id if status == "waiting" else None), **metadata)
+
+
 def inputs(host="desktop_demo", **changes):
     return dict(host_id=host, label="Desktop" if host == "desktop_demo" else "Laptop",
                 base_url="https://ha.example", notify_destination="persistent_notification.create",
@@ -153,7 +161,7 @@ async def test_two_hosts_native_registry_malformed_isolation_and_health(hass, ha
 
 
 async def test_notifications_are_after_publish_and_restore_options_revoke(hass, hass_client, hass_ws_client):
-    entry = await add_host(hass)
+    entry = await add_host(hass, notification_message_template="{model}")
     client = await hass_client()
     ws = await hass_ws_client()
     roster_id, _ = entity_ids(hass, entry)
@@ -164,10 +172,10 @@ async def test_notifications_are_after_publish_and_restore_options_revoke(hass, 
         observed_statuses.append(hass.states.get(roster_id).attributes["agents"][0]["status"])
 
     unsubscribe = async_dispatcher_connect(hass, SIGNAL_PERSISTENT_NOTIFICATIONS_UPDATED, observe_notification)
-    await post(client, entry, [record("done")])
+    await post(client, entry, [native_record("done", run="baseline-run")])
     assert await notifications(ws) == []
-    await post(client, entry, [record()])
-    await post(client, entry, [record("done", name="`\r\n<a>&[x]")])
+    await post(client, entry, [native_record()])
+    await post(client, entry, [native_record("done", model="`\r\n<a>&[x]")])
     alerts = await notifications(ws)
     assert len(alerts) == 1
     assert "`" * 65 in alerts[0]["message"]
@@ -187,7 +195,7 @@ async def test_notifications_are_after_publish_and_restore_options_revoke(hass, 
     assert restored.attributes["agents"] == before.attributes["agents"]
     assert restored.attributes["last_success"] == before.attributes["last_success"]
     assert old_runtime.closed and old_runtime.cancel_timer is None
-    await post(client, entry, [record("waiting")])
+    await post(client, entry, [native_record("waiting", run="after-reload")])
     assert await notifications(ws) == []
     flow = await hass.config_entries.options.async_init(entry.entry_id)
     changed = inputs(label="Renamed", notify_waiting=False, notify_completion=False, dashboard_path="/dashboard-agents/main")
@@ -199,8 +207,8 @@ async def test_notifications_are_after_publish_and_restore_options_revoke(hass, 
     await hass.async_block_till_done()
     assert entry.data["webhook_id"] == original_secret
     assert entry.data["label"] == "Renamed" and entry.options["notify_waiting"] is False
-    await post(client, entry, [record()])
-    await post(client, entry, [record("done")])
+    await post(client, entry, [native_record(run="disabled-run")])
+    await post(client, entry, [native_record("done", run="disabled-run")])
     assert await notifications(ws) == []
     runtime = entry.runtime_data
     result = await hass.config_entries.async_remove(entry.entry_id)
@@ -274,11 +282,11 @@ async def test_notification_toggles_are_independent(hass, hass_client, hass_ws_c
     await hass.config_entries.options.async_configure(flow["flow_id"], changed)
     await hass.config_entries.options.async_configure(flow["flow_id"], {})
     await hass.async_block_till_done()
-    await post(client, entry, [record()])
-    await post(client, entry, [record("waiting")])
+    await post(client, entry, [native_record()])
+    await post(client, entry, [native_record("waiting")])
     assert await notifications(ws) == []
-    await post(client, entry, [record()])
-    await post(client, entry, [record("done")])
+    await post(client, entry, [native_record()])
+    await post(client, entry, [native_record("done")])
     assert len(await notifications(ws)) == 1
     await hass.services.async_call("persistent_notification", "dismiss_all", {}, blocking=True)
     flow = await hass.config_entries.options.async_init(entry.entry_id)
@@ -287,10 +295,11 @@ async def test_notification_toggles_are_independent(hass, hass_client, hass_ws_c
     await hass.config_entries.options.async_configure(flow["flow_id"], changed)
     await hass.config_entries.options.async_configure(flow["flow_id"], {})
     await hass.async_block_till_done()
-    await post(client, entry, [record()])
-    await post(client, entry, [record("done")])
+    await post(client, entry, [native_record(run="completion-disabled")])
+    await post(client, entry, [native_record("done", run="completion-disabled")])
     assert await notifications(ws) == []
-    await post(client, entry, [record("waiting")])
+    await post(client, entry, [native_record(run="input-enabled")])
+    await post(client, entry, [native_record("waiting", run="input-enabled")])
     assert len(await notifications(ws)) == 1
 
 
@@ -550,15 +559,15 @@ async def test_notification_templates_persist_reload_and_reach_native_sinks(hass
     await async_setup_component(hass, "persistent_notification", {})
     initial = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     assert "notification_title_template" in initial["data_schema"].schema
-    title = "{{tty7}} {host_label} {event_type}\n{agent}"
-    message = "**Trusted text** {agent}|{model}|{effort}|{session_id}"
+    title = "{{tty7}} {host_label} {event_type}\n{model}"
+    message = "**Trusted text** {model}|{effort}|{permission_mode}|{session_id}"
     entry = await add_host(hass, notification_title_template=title, notification_message_template=message)
     assert entry.options["notification_title_template"] == title
     client = await hass_client()
     ws = await hass_ws_client()
     attack = "[x](https://evil.example)<b>&`\nnext"
-    await post(client, entry, [record()])
-    await post(client, entry, [record("done", name=attack)])
+    await post(client, entry, [native_record()])
+    await post(client, entry, [native_record("done", model=attack)])
     alerts = await notifications(ws)
     assert len(alerts) == 1
     alert = alerts[0]
@@ -580,7 +589,7 @@ async def test_notification_templates_persist_reload_and_reach_native_sinks(hass
     hass.services.async_register("notify", "mobile_app_synthetic_templates", receive_mobile)
     options = await hass.config_entries.options.async_init(entry.entry_id)
     updated_title = "{host_id}/{status}/{event}/{pane_id}"
-    updated_message = "<b>Trusted</b> {agent}|{model}|{effort}|{permission_mode}"
+    updated_message = "<b>Trusted</b> {model}|{effort}|{permission_mode}|{agent}"
     changed = inputs(notify_destination="notify.mobile_app_synthetic_templates",
                      notification_title_template=updated_title, notification_message_template=updated_message)
     changed.pop("host_id")
@@ -591,18 +600,18 @@ async def test_notification_templates_persist_reload_and_reach_native_sinks(hass
     assert entry.options["notification_title_template"] == updated_title
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    await post(client, entry, [record("done", name=attack)])
+    await post(client, entry, [native_record("done", model=attack)])
     assert delivered == []  # reload re-establishes baseline; never replays completion
-    await post(client, entry, [record()])
-    row = record("done", name=attack) | {"model": "<i>model</i>", "effort": "", "permission_mode": "[p](x)"}
+    await post(client, entry, [native_record(run="after-reload")])
+    row = native_record("done", run="after-reload", model=attack, effort="", permission_mode="[p](x)")
     await post(client, entry, [row])
     assert len(delivered) == 1
     assert delivered[0]["title"] == "desktop_demo/done/completed/1"
-    assert delivered[0]["message"] == "<b>Trusted</b> [x](https://evil.example)&lt;b&gt;&amp;` next|&lt;i&gt;model&lt;/i&gt;|None|[p](x)"
+    assert delivered[0]["message"] == "<b>Trusted</b> [x](https://evil.example)&lt;b&gt;&amp;` next|None|[p](x)|OhMyPi"
     assert delivered[0]["data"] == {"tag": original_identity, "clickAction": "/lovelace/agents"}
 
 
-async def test_old_entry_uses_default_templates_without_migration(hass, hass_client, hass_ws_client):
+async def test_missing_template_options_inherit_approved_defaults(hass, hass_client, hass_ws_client):
     entry = await add_host(hass)
     old_options = {key: value for key, value in entry.options.items()
                    if key not in ("notification_title_template", "notification_message_template")}
@@ -610,12 +619,11 @@ async def test_old_entry_uses_default_templates_without_migration(hass, hass_cli
     await hass.async_block_till_done()
     client = await hass_client()
     ws = await hass_ws_client()
-    await post(client, entry, [record()])
-    await post(client, entry, [record("waiting")])
+    await post(client, entry, [native_record()])
+    await post(client, entry, [native_record("waiting")])
     alert, = await notifications(ws)
-    assert alert["title"] == "Desktop: needs input"
-    assert " pane 1 needs input." in alert["message"]
-    assert alert["message"].endswith("[Open agent dashboard](/lovelace/agents)")
+    assert alert["title"] == "Unnamed session"
+    assert alert["message"] == "Needs your input. [Open agent dashboard](/lovelace/agents)"
 
 
 async def test_notification_templates_native_inventory_names_use_only_approved_join(hass, hass_client, hass_ws_client):
@@ -628,7 +636,7 @@ async def test_notification_templates_native_inventory_names_use_only_approved_j
     client = await hass_client()
     ws = await hass_ws_client()
     for status in ("working", "done"):
-        body = encode_report(build_snapshot("desktop_demo", [record(status)], inventory=inventory()))
+        body = encode_report(build_snapshot("desktop_demo", [native_record(status)], inventory=inventory()))
         assert (await post(client, entry, body=body)).status == 204
     alert, = await notifications(ws)
     assert alert["title"] == "Private workspace|Private tab"
@@ -636,8 +644,125 @@ async def test_notification_templates_native_inventory_names_use_only_approved_j
     await hass.services.async_call("persistent_notification", "dismiss_all", {}, blocking=True)
     inconsistent = inventory("sample-inconsistent") | {"consistent": False}
     for status in ("working", "done"):
-        body = encode_report(build_snapshot("desktop_demo", [record(status)], inventory=inconsistent))
+        body = encode_report(build_snapshot("desktop_demo", [native_record(status, run="next-run")], inventory=inconsistent))
         assert (await post(client, entry, body=body)).status == 204
     alert, = await notifications(ws)
     assert alert["title"] == "|"
     assert "Private tab" not in alert["message"] and "Private workspace" not in alert["message"]
+
+
+@pytest.mark.parametrize("title,message,expected_title,expected_message", [
+    ("{host_label}: {event}", "{host_label}: {agent} pane {pane_id} {event}.", "{session_name}", "{event_message}"),
+    ("Custom {host_label}", "{host_label}: {agent} pane {pane_id} {event}.", "Custom {host_label}", "{event_message}"),
+    ("{host_label}: {event}", "Custom {event_type}", "{session_name}", "Custom {event_type}"),
+    ("{host_label}: {event} ", " {host_label}: {agent} pane {pane_id} {event}.",
+     "{host_label}: {event} ", " {host_label}: {agent} pane {pane_id} {event}."),
+    (None, None, None, None),
+])
+@pytest.mark.parametrize("destination", ["none", "persistent_notification.create", "notify.mobile_app_migrated"])
+async def test_native_minor_migration_only_replaces_exact_builtins_once(
+    hass, hass_ws_client, title, message, expected_title, expected_message, destination,
+):
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    await async_setup_component(hass, "persistent_notification", {})
+    delivered = []
+
+    @callback
+    def receive_mobile(call):
+        delivered.append(call.data)
+
+    hass.services.async_register("notify", "mobile_app_migrated", receive_mobile)
+    data = dict(host_id="migration_host", label="Custom host", base_url="https://ha.example",
+                webhook_id="f" * 64, preserved_data="unchanged")
+    options = dict(notify_destination=destination, notify_waiting=False, notify_completion=False,
+                   dashboard_path="/custom/agents", retain_inventory=False, preserved_option="unchanged")
+    if title is not None:
+        options["notification_title_template"] = title
+    if message is not None:
+        options["notification_message_template"] = message
+    expected = dict(options)
+    if expected_title is not None:
+        expected["notification_title_template"] = expected_title
+    if expected_message is not None:
+        expected["notification_message_template"] = expected_message
+    entry = MockConfigEntry(domain=DOMAIN, version=1, minor_version=1, title=data["label"],
+                            unique_id=data["host_id"], data=data, options=options)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert (entry.version, entry.minor_version) == (1, 2)
+    assert entry.data == data
+    assert entry.options == expected
+    runtime = entry.runtime_data
+    assert runtime.controller.accept(build_snapshot("migration_host", [native_record("done")]), dt_util.utcnow()) == []
+    await runtime.notify(native_record("done", outcome="failed") | {"kind": "failed"})
+    await runtime.notify(native_record("waiting") | {"kind": "needs_input"})
+    assert delivered == []  # disabled toggles remain disabled for failures and inputs
+    ws = await hass_ws_client()
+    assert await notifications(ws) == []
+    # A user can deliberately choose old-looking custom text after migration.
+    deliberate = dict(entry.options) | {"notification_title_template": "{host_label}: {event}"}
+    hass.config_entries.async_update_entry(entry, options=deliberate)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.options == deliberate
+    assert entry.data == data
+    assert entry.runtime_data.controller.baseline_ready is False
+
+
+@pytest.mark.parametrize("destination", ["persistent_notification.create", "notify.mobile_app_real_events"])
+async def test_real_event_delivery_preserves_defaults_failure_routing_and_input_identity(
+    hass, hass_client, hass_ws_client, destination,
+):
+    from test_controller import inventory
+    delivered = []
+
+    @callback
+    def receive_mobile(call):
+        delivered.append(call.data)
+
+    hass.services.async_register("notify", "mobile_app_real_events", receive_mobile)
+    entry = await add_host(hass, notify_destination=destination, dashboard_path="/custom/agents")
+    client = await hass_client()
+    ws = await hass_ws_client()
+    updates = []
+
+    @callback
+    def observe_notification(update_type, changes):
+        updates.append(update_type)
+
+    unsubscribe = async_dispatcher_connect(hass, SIGNAL_PERSISTENT_NOTIFICATIONS_UPDATED, observe_notification)
+    await post(client, entry, [native_record()])
+    for input_id in ("question-one", "question-one", "approval-two"):
+        row = native_record("waiting", input_id=input_id)
+        assert (await post(client, entry, [row])).status == 204
+        await post(client, entry, [native_record()])
+    if destination.startswith("notify."):
+        assert [alert["message"] for alert in delivered] == ["Needs your input.", "Needs your input."]
+    else:
+        await hass.async_block_till_done()
+        assert len(updates) == 2
+    # Distinct proof, not a guessed done status, selects the failure message.
+    body = encode_report(build_snapshot("desktop_demo", [native_record("done", outcome="failed")],
+                                        inventory=inventory()))
+    assert (await post(client, entry, body=body)).status == 204
+    alert = delivered[-1] if destination.startswith("notify.") else (await notifications(ws))[0]
+    assert alert["title"] == "Private tab"
+    assert alert["message"] == ("Failed." if destination.startswith("notify.")
+                                else "Failed. [Open agent dashboard](/custom/agents)")
+    if destination.startswith("notify."):
+        assert alert["data"]["clickAction"] == "/custom/agents"
+        assert len(delivered) == 3
+    # Neither cancellation nor stock/legacy terminal rows may reach either sink.
+    await hass.async_block_till_done()
+    before = len(delivered) if destination.startswith("notify.") else len(updates)
+    for run, outcome in (("cancelled-run", "cancelled"), ("missing-outcome", None)):
+        await post(client, entry, [native_record(run=run)])
+        assert (await post(client, entry, [native_record("done", run=run, outcome=outcome)])).status == 204
+    await post(client, entry, [record()])
+    await post(client, entry, [record("waiting")])
+    await post(client, entry, [record("done")])
+    await hass.async_block_till_done()
+    assert (len(delivered) if destination.startswith("notify.") else len(updates)) == before
+    unsubscribe()

@@ -165,6 +165,22 @@ async def _release_frontend(hass: HomeAssistant, entry_id: str) -> None:
         # bundle path registered for a later reload; it carries no host data.
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Replace only the former built-ins, once, without changing user choices."""
+    if entry.version > 1:
+        return False
+    if entry.version == 1 and entry.minor_version < 2:
+        options = dict(entry.options)
+        for key, legacy in (
+            (CONF_TITLE_TEMPLATE, "{host_label}: {event}"),
+            (CONF_MESSAGE_TEMPLATE, "{host_label}: {agent} pane {pane_id} {event}."),
+        ):
+            if options.get(key) == legacy:
+                options[key] = DEFAULT_OPTIONS[key]
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         install_redactor().remember(entry.data[CONF_WEBHOOK_ID])
