@@ -45,6 +45,7 @@ class OmpStatus(TypedDict):
     background_jobs: int | None
     outcome: NotRequired[OmpOutcome | None]
     input_id: NotRequired[str | None]
+    session_name: NotRequired[str | None]
 
 
 class AgentRecord(TypedDict):
@@ -227,7 +228,7 @@ def _record_fields(
 
 def _omp_status(value: object, record: AgentRecord) -> OmpStatus:
     fields = {"state", "run_id", "background_jobs"}
-    if not isinstance(value, dict) or not fields <= value.keys() <= fields | {"outcome", "input_id"}:
+    if not isinstance(value, dict) or not fields <= value.keys() <= fields | {"outcome", "input_id", "session_name"}:
         raise PayloadError()
     data = value
     state = data["state"]
@@ -246,6 +247,11 @@ def _omp_status(value: object, record: AgentRecord) -> OmpStatus:
         result["outcome"] = cast(OmpOutcome | None, outcome)
     if "input_id" in data:
         result["input_id"] = input_id
+    if "session_name" in data:
+        name = _text(data["session_name"], 256, nullable=True, display=True)
+        if name is not None and (not name.strip() or state != "ready"):
+            raise PayloadError()
+        result["session_name"] = name
     if outcome is not None and (
             state != "ready" or record["status"] != "done" or result["run_id"] is None
             or result["background_jobs"] != 0 or input_id is not None):

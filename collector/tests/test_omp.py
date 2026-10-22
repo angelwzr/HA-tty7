@@ -1,6 +1,7 @@
 """Native main-agent observations at real collector and canonical wire boundaries."""
 
 import copy
+from dataclasses import replace
 import fcntl
 import json
 import os
@@ -81,10 +82,10 @@ class NativeCollectorTests(unittest.TestCase):
         path.chmod(0o600)
         return path
 
-    def overlay(self, rows=None, *, now=NOW):
+    def overlay(self, rows=None, *, now=NOW, **options):
         from ha_tty7.omp import apply_native_status
         return apply_native_status(normalize_agents({"agents": [stock()] if rows is None else rows}),
-                                   directory=self.directory, now_ms=now)
+                                   directory=self.directory, now_ms=now, **options)
 
     def assert_unavailable(self, row, state):
         self.assertEqual(row["status"], "unknown")
@@ -97,6 +98,120 @@ class NativeCollectorTests(unittest.TestCase):
         self.assertNotIn("inferred", row)
         self.assertEqual(row["omp"], {"state": state, "run_id": None, "background_jobs": None,
                                      "outcome": None, "input_id": None})
+
+    def test_session_name_defaults_private_and_grant_revocation_is_immediate(self):
+        title = "Synthetic complete session title beyond forty characters — 😀"
+        self.write_record(native(session_name=title))
+        self.assertEqual(self.overlay()[0], ready_row())
+        marker = self.directory / ".names-enabled"
+        self.assertFalse(marker.exists())
+        row = self.overlay(include_session_names=True)[0]
+        self.assertEqual(row["omp"]["session_name"], title)
+        self.assertEqual(marker.read_bytes(), b"1\n")
+        self.assertEqual(marker.stat().st_mode & 0o7777, 0o600)
+        before = marker.stat()
+        self.overlay(include_session_names=True)
+        self.assertEqual((marker.stat().st_ino, marker.stat().st_mtime_ns),
+                         (before.st_ino, before.st_mtime_ns))
+        self.assertEqual(decode_report(encode_report(build_snapshot("host", [row])), "host")["agents"], [row])
+        self.assertEqual(self.overlay()[0], ready_row())
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.overlay(include_session_names=True, now=NOW + 10001)[0]["omp"].get("session_name"), None)
+
+    def test_name_policy_refuses_unsafe_markers_without_breaking_status(self):
+        self.write_record(native(session_name="PRIVATE"))
+        marker = self.directory / ".names-enabled"
+        target = self.home / "target"
+        target.write_bytes(b"1\n")
+        target.chmod(0o600)
+        for kind in ("symlink", "hardlink", "public", "invalid", "directory"):
+            with self.subTest(kind=kind):
+                if kind == "symlink":
+                    marker.symlink_to(target)
+                elif kind == "hardlink":
+                    os.link(target, marker)
+                elif kind == "directory":
+                    marker.mkdir()
+                else:
+                    marker.write_bytes(b"bad" if kind == "invalid" else b"1\n")
+                    marker.chmod(0o644 if kind == "public" else 0o600)
+                try:
+                    self.assertEqual(self.overlay(include_session_names=True)[0], ready_row())
+                    self.assertEqual(self.overlay()[0], ready_row())
+                    self.assertTrue(marker.exists())
+                finally:
+                    if kind == "directory":
+                        marker.rmdir()
+                    else:
+                        marker.unlink()
+        self.assertEqual(target.read_bytes(), b"1\n")
+
+    def test_policy_write_failure_and_lock_contention_suppress_name_not_status(self):
+        self.write_record(native(session_name="PRIVATE"))
+        with patch("ha_tty7.omp.os.replace", side_effect=PermissionError):
+            self.assertEqual(self.overlay(include_session_names=True)[0], ready_row())
+        self.assertFalse(list(self.directory.glob("*.tmp")))
+        self.overlay(include_session_names=True)
+        with patch("ha_tty7.omp.os.unlink", side_effect=PermissionError):
+            self.assertEqual(self.overlay()[0], ready_row())
+        self.assertTrue((self.directory / ".names-enabled").exists())
+        lock = os.open(self.directory / ".publish.lock", os.O_RDWR)
+        self.addCleanup(os.close, lock)
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.assertEqual(self.overlay()[0], ready_row())
+        self.assertEqual(self.overlay(include_session_names=True)[0], ready_row())
+
+    def test_missing_directory_is_not_created_for_consent_and_next_poll_grants(self):
+        self.directory.rmdir()
+        row = self.overlay(include_session_names=True)[0]
+        self.assert_unavailable(row, "missing")
+        self.assertFalse(self.directory.exists())
+        self.directory.mkdir(mode=0o700)
+        self.write_record(native(session_name="Full synthetic session title beyond forty characters"))
+        row = self.overlay(include_session_names=True)[0]
+        self.assertEqual(row["omp"]["session_name"], "Full synthetic session title beyond forty characters")
+
+    def test_invalid_optional_native_names_do_not_poison_healthy_status(self):
+        for name in (None, "", " ", [], {}, 1, "x" * 257, "\ud800", "a\nb", "a\x7fb", "a\x85b"):
+            with self.subTest(name=name):
+                self.write_record(native(session_name=name))
+                row = self.overlay(include_session_names=True)[0]
+                self.assertEqual(row["omp"].get("session_name"), None)
+                self.assertEqual(row["status"], "working")
+                self.assertEqual(row["omp"]["run_id"], "run-1")
+        self.write_record(native(session_name="😀" * 256))
+        self.assertEqual(self.overlay(include_session_names=True)[0]["omp"]["session_name"], "😀" * 256)
+
+    def test_main_passes_exact_consent_even_when_inventory_fails(self):
+        self.write_record(native(session_name="Full synthetic session title beyond forty characters"))
+        for enabled, names, derived in ((False, True, True), (True, False, True),
+                                        (True, True, False), (True, True, True)):
+            config = replace(self.config, collect_inventory=enabled, include_names=names,
+                             include_derived_labels=derived)
+            with patch("ha_tty7.main.read_inventory", side_effect=PayloadError()):
+                report = collect_report(config)
+            self.assertEqual(report["kind"], "snapshot")
+            self.assertEqual(report["agents"][0]["omp"].get("session_name") is not None,
+                             enabled and names and derived)
+
+    def test_optout_revokes_local_grant_even_when_roster_read_fails(self):
+        self.write_record(native(session_name="PRIVATE"))
+        self.overlay(include_session_names=True)
+        marker = self.directory / ".names-enabled"
+        self.assertTrue(marker.exists())
+        with patch("ha_tty7.main.read_agents", side_effect=PayloadError()):
+            report = collect_report(self.config)
+        self.assertEqual(report["kind"], "error")
+        self.assertFalse(marker.exists())
+
+    def test_pruning_named_records_keeps_malformed_optional_name_files(self):
+        expired = self.write_record(native(session_name="Full synthetic session name",
+                                           updated_at_ms=NOW - 60000))
+        malformed = self.write_record(native(reporter_id=OTHER_REPORTER,
+            session_name={"custom": "not a generated scalar"}, updated_at_ms=NOW - 60000))
+        self.overlay()
+        self.assertFalse(expired.exists())
+        self.assertTrue(malformed.exists())
 
     def test_notification_proof_roundtrips_and_unavailable_overlay_clears_it(self):
         for outcome in ("completed", "failed", "cancelled"):
@@ -469,6 +584,24 @@ class NativeCollectorTests(unittest.TestCase):
 
 
 class NativeWireTests(unittest.TestCase):
+    def test_session_name_wire_is_optional_nullable_exact_and_ready_only(self):
+        for name in (None, "Full synthetic session title beyond forty characters 😀", "😀" * 256):
+            row = ready_row()
+            row["omp"]["session_name"] = name
+            self.assertEqual(decode_report(encode_report(build_snapshot("host", [row])), "host")["agents"], [row])
+        for name in ("", " ", {}, [], 1, "x" * 257, "\ud800", "a\nb", "a\x7fb", "a\x85b"):
+            row = ready_row()
+            row["omp"]["session_name"] = name
+            with self.subTest(name=name), self.assertRaises(PayloadError):
+                build_snapshot("host", [row])
+        for state in ("missing", "stale", "invalid", "conflict", "unsupported"):
+            row = ready_row() | {"session_id": None, "status": "unknown", "rich": False,
+                "omp": {"state": state, "run_id": None, "background_jobs": None, "session_name": "PRIVATE"}}
+            with self.subTest(state=state), self.assertRaises(PayloadError):
+                build_snapshot("host", [row])
+            row["omp"]["session_name"] = None
+            self.assertEqual(build_snapshot("host", [row])["agents"], [row])
+
     def test_exact_native_projection_roundtrips_and_old_records_remain_compatible(self):
         row = ready_row()
         report = build_snapshot("host", [row])

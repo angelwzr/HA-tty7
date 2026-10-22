@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { chmodSync, closeSync, constants, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, linkSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -47,6 +47,61 @@ beforeEach(async () => {
 });
 afterEach(async () => { await emit("session_shutdown"); globalThis.setInterval = restoreInterval; globalThis.clearInterval = restoreClear; process.env = old; rmSync(home, { recursive: true, force: true }); });
 
+test("full session names require a private grant and refresh independently of settled run identity", async () => {
+  let reads = 0, name: unknown = "Synthetic complete session title beyond forty characters — 😀";
+  const ctx = context();
+  Object.defineProperty(ctx.sessionManager, "getSessionName", { value: () => { reads++; return name; } });
+  await emit("agent_start", {}, ctx);
+  expect(reads).toBe(0); expect(record().session_name ?? null).toBeNull();
+  const marker = join(directory(), ".names-enabled");
+  writeFileSync(marker, "1\n", { mode: 0o600 });
+  await emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
+  const first = record();
+  expect(first.session_name).toBe(name); expect(first.outcome).toBe("completed");
+  name = "Renamed complete session title still beyond forty characters 😀"; tick();
+  expect(record()).toMatchObject({ session_name: name, run_id: first.run_id, outcome: "completed", health: "ready" });
+  const child = context("sub");
+  Object.defineProperty(child.sessionManager, "getSessionName", { get() { throw new Error("child name accessed"); } });
+  const before = record();
+  for (const event of handlers.keys()) await emit(event, {}, child);
+  expect(record()).toEqual(before);
+  rmSync(marker); const grantedReads = reads; tick();
+  expect(reads).toBe(grantedReads);
+  expect(record()).toMatchObject({ session_name: null, run_id: first.run_id, outcome: "completed", health: "ready" });
+});
+test("unsafe or nonexact naming markers never observe names or disrupt status", async () => {
+  let reads = 0;
+  const ctx = context();
+  Object.defineProperty(ctx.sessionManager, "getSessionName", { value: () => { reads++; return "PRIVATE_NAME"; } });
+  await emit("session_start", {}, ctx);
+  const marker = join(directory(), ".names-enabled"), target = join(home, "marker-target");
+  writeFileSync(target, "1\n", { mode: 0o600 });
+  for (const mode of ["symlink", "hardlink", "public", "empty", "extra", "directory"]) {
+    if (mode === "symlink") symlinkSync(target, marker);
+    else if (mode === "hardlink") linkSync(target, marker);
+    else if (mode === "directory") symlinkSync(directory(), marker);
+    else writeFileSync(marker, mode === "empty" ? "" : mode === "extra" ? "1\nx" : "1\n", { mode: mode === "public" ? 0o644 : 0o600 });
+    tick();
+    expect(reads).toBe(0); expect(record().session_name ?? null).toBeNull();
+    expect(record()).toMatchObject({ health: "ready", status: "idle" });
+    rmSync(marker);
+  }
+  expect(readFileSync(target, "utf8")).toBe("1\n");
+});
+test("name getter errors and invalid scalars clear only optional name metadata", async () => {
+  let name: unknown = "😀".repeat(256), fails = false;
+  const ctx = context();
+  Object.defineProperty(ctx.sessionManager, "getSessionName", { value: () => { if (fails) throw new Error("PRIVATE"); return name; } });
+  await emit("agent_start", {}, ctx);
+  writeFileSync(join(directory(), ".names-enabled"), "1\n", { mode: 0o600 });
+  tick(); const first = record(); expect(first.session_name).toBe(name);
+  for (const value of [undefined, null, "", " ", 7, {}, ["name"], "😀".repeat(257), "\ud800", "a\nb", "a\u007fb", "a\u0085b"]) {
+    name = value; tick();
+    expect(record()).toMatchObject({ session_name: null, health: "ready", status: "working", run_id: first.run_id });
+  }
+  fails = true; tick();
+  expect(record()).toMatchObject({ session_name: null, health: "ready", run_id: first.run_id });
+});
 test("factory and all child callbacks do no filesystem IO and cannot overwrite main", async () => {
   expect(files()).toEqual([]); expect(timers.size).toBe(0);
   await emit("session_start", {}, context("sub")); expect(files()).toEqual([]);
@@ -121,7 +176,7 @@ test("native metadata samples live model and thinking-only changes at heartbeat 
   thinking = "low"; tick();
   expect(record().effort).toBe("low"); expect(record().run_id).toBe(first.run_id);
   const text = readFileSync(join(directory(), files()[0]), "utf8");
-  expect(text).not.toMatch(/PRIVATE|apiKey|baseUrl|name/);
+  expect(text).not.toMatch(/PRIVATE|apiKey|baseUrl|"name"/);
 });
 test("native metadata reads only public provider id and thinking scalars, never private getters or child metadata", async () => {
   let privateReads = 0;
@@ -202,10 +257,10 @@ test("pruning removes only old valid generated records and preserves custom file
 });
 test("native metadata pruning accepts optional bounded scalars and preserves invalid or private extras", async () => {
   await emit("session_start"); const fixture = record(); await emit("session_shutdown");
-  delete fixture.model; delete fixture.effort;
+  delete fixture.model; delete fixture.effort; delete fixture.session_name;
   const oldTime = new Date(Date.now() - 65000);
-  const valid = [{}, { model: null }, { effort: null }, { model: "openai/gpt-5", effort: "off" }, { model: `p/${"😀".repeat(126)}`, effort: "😀".repeat(128) }];
-  const invalid = [{ model: "" }, { effort: " \t" }, { model: "\ud800" }, { effort: "\udc00" }, { model: "x".repeat(129) }, { effort: {} }, { model: "p/m", effort: "high", apiKey: "PRIVATE" }];
+  const valid = [{}, { model: null }, { effort: null }, { session_name: null }, { session_name: "😀".repeat(256) }, { model: "openai/gpt-5", effort: "off" }, { model: `p/${"😀".repeat(126)}`, effort: "😀".repeat(128) }];
+  const invalid = [{ model: "" }, { effort: " \t" }, { model: "\ud800" }, { effort: "\udc00" }, { model: "x".repeat(129) }, { effort: {} }, { session_name: "" }, { session_name: "a\nb" }, { session_name: "😀".repeat(257) }, { model: "p/m", effort: "high", apiKey: "PRIVATE" }];
   const validNames: string[] = [], invalidNames: string[] = [];
   for (const [values, names] of [[valid, validNames], [invalid, invalidNames]] as const) {
     for (const metadata of values) {

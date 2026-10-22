@@ -80,6 +80,14 @@ export function tabForPane(inventory: InventorySnapshot | null, paneId: number):
   }
   return membership?.tab_id === pane.tab_id && membership.workspace_id === pane.workspace_id ? membership : null;
 }
+export function nativeSessionName(host: HostView, agent: AgentRecord | null): string | null {
+  const inventory = host.inventory;
+  if (!agent || agent.omp?.state !== 'ready' || host.inventoryState !== 'healthy'
+    || !inventory?.consistent || !inventory.names_included || !inventory.derived_labels_included) return null;
+  const tab = tabForPane(inventory, agent.pane_id);
+  if (!tab || !inventory.workspaces.some(workspace => workspace.workspace_id === tab.workspace_id)) return null;
+  return agent.omp.session_name ?? null;
+}
 const URGENCY: Record<AgentRecord['status'], number> = { waiting: 0, working: 1, done: 2, unknown: 3, idle: 4 };
 export function selectRepresentative(agents: readonly AgentView[]): AgentView | null {
   return agents.reduce<AgentView | null>((best, agent) => !best || URGENCY[agent.status] < URGENCY[best.status] ? agent : best, null);

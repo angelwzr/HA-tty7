@@ -1,7 +1,7 @@
 {
   "domain": "ha_tty7",
   "name": "HA-tty7",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "codeowners": ["@angelwzr"],
   "documentation": "https://github.com/angelwzr/HA-tty7",
   "issue_tracker": "https://github.com/angelwzr/HA-tty7/issues",

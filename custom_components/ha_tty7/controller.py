@@ -9,7 +9,7 @@ from typing import Any
 
 from .protocol import (
     FRESHNESS_SECONDS, AgentRecord, ErrorReport, InventoryReport, PayloadError,
-    Snapshot, SourceInfo, build_error, build_snapshot,
+    Snapshot, SourceInfo, TabRecord, WorkspaceRecord, build_error, build_snapshot,
 )
 from .template import DEFAULT_MESSAGE_TEMPLATE, DEFAULT_TITLE_TEMPLATE, TEMPLATE_FIELDS, format_notification
 STATUSES = ("idle", "working", "waiting", "done", "unknown")
@@ -52,6 +52,16 @@ def _authoritative(agent: AgentRecord | None) -> bool:
                 or agent["status"] != "waiting" or run is None or outcome is not None):
             return False
     return True
+
+
+def _native_session_name(agent: AgentRecord) -> str | None:
+    native = agent.get("omp")
+    name = native.get("session_name") if native is not None else None
+    if (not _authoritative(agent) or not isinstance(name, str) or not name.strip()
+            or len(name) > 256 or any(ord(char) < 32 or 127 <= ord(char) <= 159
+                                    or 0xD800 <= ord(char) <= 0xDFFF for char in name)):
+        return None
+    return name
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -126,6 +136,7 @@ class HostController:
     def restore_attributes(self, *, retain_inventory: bool = False) -> dict[str, Any]:
         """Privacy consent applies to storage, not live inventory display."""
         attributes = self.attributes
+        attributes["agents"] = self._private_name_projection(self.agents, retain_names=retain_inventory)
         if not retain_inventory:
             attributes.update(inventory=None, inventory_state="disabled", inventory_last_contact=None,
                               inventory_last_success=None, inventory_error_code=None)
@@ -153,7 +164,7 @@ class HostController:
                 return
         except (KeyError, ValueError, TypeError, PayloadError):
             return
-        self.agents = agents
+        self.agents = self._private_name_projection(agents, retain_names=False)
         for agent in agents:
             if "omp" in agent:
                 self._native_transition(agent, None, False)
@@ -184,6 +195,7 @@ class HostController:
             self.inventory_last_contact = inventory_contact
             self.inventory_last_success = inventory_success
             self.inventory_state = "unconfirmed"
+            self.agents = self._private_name_projection(agents)
 
     def expire(self, now: datetime) -> bool:
         """Independently expire roster and inventory on HA receipt clocks."""
@@ -205,10 +217,12 @@ class HostController:
         self, *, names_included: bool | None, derived_labels_included: bool | None,
     ) -> None:
         """Apply consent revocation without claiming another observation."""
-        if self.inventory is None or self.inventory["kind"] != "snapshot":
-            return
         names_revoked = names_included is False
         labels_revoked = names_revoked or derived_labels_included is False
+        if labels_revoked:
+            self.agents = self._private_name_projection(self.agents, retain_names=False)
+        if self.inventory is None or self.inventory["kind"] != "snapshot":
+            return
         if not names_revoked and not labels_revoked:
             return
         self.inventory = {
@@ -223,7 +237,11 @@ class HostController:
         }
 
     def _accept_inventory(self, report: InventoryReport | None, now: datetime) -> None:
+        if report is not None and report["kind"] == "snapshot":
+            self._revoke_inventory_fields(names_included=report["names_included"],
+                                          derived_labels_included=report["derived_labels_included"])
         if report is None:
+            self.agents = self._private_name_projection(self.agents, retain_names=False)
             self.inventory = None
             self.inventory_state = "disabled"
             self.inventory_last_contact = self.inventory_last_success = None
@@ -242,27 +260,51 @@ class HostController:
             self.inventory_last_contact = self.inventory_last_success = now
             self.inventory_error_code = None
 
-    def _notification_names(self, pane_id: int) -> dict[str, str | None]:
-        """Use names only from a fresh approved, mutually agreeing unique join."""
+    def _name_membership(self, agent: AgentRecord) -> tuple[TabRecord, WorkspaceRecord] | None:
+        """Share the same approved unique join for naming and private storage."""
         inventory = self.inventory
-        if (self.inventory_state != "healthy" or inventory is None or inventory["kind"] != "snapshot"
+        if (inventory is None or inventory["kind"] != "snapshot"
                 or not inventory["consistent"] or not inventory["names_included"]):
-            return {}
+            return None
+        pane_id = agent["pane_id"]
         panes = [pane for pane in inventory["panes"] if pane["pane_id"] == pane_id]
         tabs = [tab for tab in inventory["tabs"] if pane_id in tab["pane_ids"]]
         if len(panes) != 1 or len(tabs) != 1:
-            return {}
+            return None
         pane, tab = panes[0], tabs[0]
         if (pane["orphan"] or pane["workspace_id"] != tab["workspace_id"]
                 or pane["tab_id"] != tab["tab_id"]):
-            return {}
+            return None
         workspaces = [workspace for workspace in inventory["workspaces"]
                       if workspace["workspace_id"] == tab["workspace_id"]]
         if len(workspaces) != 1:
+            return None
+        return tab, workspaces[0]
+
+    def _private_name_projection(
+        self, agents: list[AgentRecord], *, retain_names: bool = True,
+    ) -> list[AgentRecord]:
+        """Copy only private fields being scrubbed; never mutate live or stored inputs."""
+        return [
+            {**agent, "omp": {**agent["omp"], "session_name": None}}
+            if agent.get("omp", {}).get("session_name") is not None and not (
+                retain_names and self._name_membership(agent) is not None
+                and self.inventory["derived_labels_included"] and _native_session_name(agent) is not None
+            ) else agent
+            for agent in agents
+        ]
+
+    def _notification_names(self, agent: AgentRecord) -> dict[str, str | None]:
+        """Use names only from a fresh approved, mutually agreeing unique join."""
+        if self.inventory_state != "healthy" or (membership := self._name_membership(agent)) is None:
             return {}
-        label = tab["label"] if inventory["derived_labels_included"] else None
-        session_name = next((name for name in (tab["name"], label) if name and name.strip()), "Unnamed session")
-        return {"tab_name": tab["name"], "workspace_name": workspaces[0]["name"],
+        tab, workspace = membership
+        derived = self.inventory["derived_labels_included"]
+        label = tab["label"] if derived else None
+        native_name = _native_session_name(agent) if derived else None
+        session_name = next((name for name in (tab["name"], native_name, label)
+                             if name and name.strip()), "Unnamed session")
+        return {"tab_name": tab["name"], "workspace_name": workspace["name"],
                 "session_name": session_name}
 
     def _native_transition(
@@ -318,7 +360,7 @@ class HostController:
             return events
         self._accept_inventory(report.get("inventory"), now)
         self.source = report.get("source")
-        self.agents = report["agents"]
+        self.agents = self._private_name_projection(report["agents"])
         self.collector_ok = self.baseline_ready = True
         self.error_code = None
         self.last_success = now
@@ -332,7 +374,7 @@ class HostController:
             if "omp" in agent:
                 kind = self._native_transition(agent, previous_agents.get(agent["pane_id"]), was_ready)
                 if kind is not None:
-                    events.append(dict(agent, kind=kind, **self._notification_names(agent["pane_id"])))
+                    events.append(dict(agent, kind=kind, **self._notification_names(agent)))
         return events
 
 

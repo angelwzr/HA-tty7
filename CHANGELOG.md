@@ -4,6 +4,26 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-10-22
+
+### Fixed
+
+- OMP session titles now come from the supported native full-name API instead of relying on tty7's automatic JSON labels, which are already truncated to 40 characters before reaching Home Assistant.
+- Explicit tab names still take priority. Expanded rows reveal the complete available title; grouped headings use the selected visible session rather than another pane.
+- Native name changes refresh without resetting run identity, changing notification text or generating extra alerts.
+
+### Privacy
+
+- Native full names require the existing inventory, names and derived-label opt-ins. An owned private local consent marker gates even the native getter; revoked/unsafe consent cannot export names.
+- Native names are validated as optional, nonblank, control-free strings up to 256 Unicode characters. Invalid names do not invalidate healthy status.
+- Default restoration excludes native names. Retention, error-time revocation and ambiguous inventory joins preserve the existing privacy boundaries.
+
+### Upgrade requirements
+
+- Update HA first, then the matching reporter. Restart existing OMP sessions only after their foreground/background work finishes so they load the new native-name reporter.
+- The 0.4.5 layout fix alone cannot recover suffixes removed by tty7. Older OMP reporters and other stock-only agents retain their available fallback label; no missing text is invented.
+
+
 ## [0.4.5] - 2026-10-22
 
 ### Fixed
@@ -197,7 +217,8 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 - Bundled card, visual editor and automatic frontend loading.
 - Host-bound HTTPS ingestion, freshness handling, restoration and optional notifications.
 
-[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/angelwzr/HA-tty7/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/angelwzr/HA-tty7/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/angelwzr/HA-tty7/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/angelwzr/HA-tty7/compare/v0.4.2...v0.4.3

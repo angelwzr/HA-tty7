@@ -63,17 +63,21 @@ export function validateConfig(value: unknown): CardConfig {
 }
 
 function parseOmp(value: unknown): OmpSource | null {
-  if (!object(value) || Object.keys(value).some(key => !['state', 'run_id', 'background_jobs', 'outcome', 'input_id'].includes(key))
+  if (!object(value) || Object.keys(value).some(key => !['state', 'run_id', 'background_jobs', 'outcome', 'input_id', 'session_name'].includes(key))
     || !Object.hasOwn(value, 'state') || !Object.hasOwn(value, 'run_id') || !Object.hasOwn(value, 'background_jobs')
     || !OMP_STATES.includes(value.state as OmpSource['state'])
     || (value.run_id !== null && !boundedString(value.run_id, 128))
     || (value.background_jobs !== null && !safeNumber(value.background_jobs))
     || (Object.hasOwn(value, 'outcome') && value.outcome !== null && !['completed', 'failed', 'cancelled'].includes(value.outcome as string))
-    || (Object.hasOwn(value, 'input_id') && value.input_id !== null && !boundedString(value.input_id, 128))) return null;
+    || (Object.hasOwn(value, 'input_id') && value.input_id !== null && !boundedString(value.input_id, 128))
+    || (Object.hasOwn(value, 'session_name') && value.session_name !== null
+      && (!boundedString(value.session_name, 256) || !value.session_name.trim()
+        || /[\u0000-\u001f\u007f-\u009f]/u.test(value.session_name)))) return null;
   return { state: value.state as OmpSource['state'], run_id: value.run_id as string | null,
     background_jobs: value.background_jobs as number | null,
     ...(Object.hasOwn(value, 'outcome') ? { outcome: value.outcome as Exclude<OmpSource['outcome'], undefined> } : {}),
-    ...(Object.hasOwn(value, 'input_id') ? { input_id: value.input_id as string | null } : {}) };
+    ...(Object.hasOwn(value, 'input_id') ? { input_id: value.input_id as string | null } : {}),
+    ...(Object.hasOwn(value, 'session_name') ? { session_name: value.session_name as string | null } : {}) };
 }
 
 function parseAgent(value: unknown): AgentRecord | null {
@@ -97,7 +101,8 @@ function parseAgent(value: unknown): AgentRecord | null {
         || parsed.background_jobs === null) return null;
     } else if (value.status !== 'unknown' || value.session_id !== null
       || value.rich !== false || value.inferred === true
-      || parsed.run_id !== null || parsed.background_jobs !== null || parsed.outcome != null || parsed.input_id != null) return null;
+      || parsed.run_id !== null || parsed.background_jobs !== null || parsed.outcome != null || parsed.input_id != null
+      || parsed.session_name != null) return null;
     if (parsed.outcome != null && (value.status !== 'done' || parsed.run_id === null
       || parsed.background_jobs !== 0 || parsed.input_id != null)) return null;
     if (parsed.input_id != null && (value.status !== 'waiting' || parsed.run_id === null || parsed.outcome != null)) return null;

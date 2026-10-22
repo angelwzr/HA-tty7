@@ -1,7 +1,7 @@
 // Managed by HA-tty7. Public OMP 18.12.5 lifecycle only; no HA credentials.
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, opendirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, opendirSync, readFileSync, readSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 type Status = "idle" | "working" | "waiting" | "done" | "unknown";
 type Outcome = "completed" | "failed" | "cancelled";
 type Event = { type?: string; messages?: unknown; willContinue?: unknown; awaitingAsyncWork?: unknown; willRetry?: unknown; aborted?: unknown; success?: unknown; toolCallId?: unknown; toolName?: unknown; sessionId?: unknown };
-type PublicContext = Pick<ExtensionContext, "agent"> & Partial<Pick<ExtensionContext, "model" | "isIdle" | "hasPendingMessages" | "getAsyncJobSnapshot">> & { sessionId: () => string };
+type PublicContext = Pick<ExtensionContext, "agent"> & Partial<Pick<ExtensionContext, "model" | "isIdle" | "hasPendingMessages" | "getAsyncJobSnapshot">> & { sessionId: () => string; sessionName: () => unknown };
 interface NativeRecord {
   schema_version: 1;
   reporter_id: string;
@@ -24,6 +24,7 @@ interface NativeRecord {
   health: "ready" | "unsupported";
   model?: string | null;
   effort?: string | null;
+  session_name?: string | null;
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const uid = () => process.getuid!();
@@ -42,6 +43,22 @@ function identifierScalar(value: unknown, limit = 128): value is string {
 
 function metadataScalar(value: unknown): value is string {
   return identifierScalar(value) && !!value.trim();
+}
+
+function sessionNameScalar(value: unknown): value is string {
+  return identifierScalar(value, 256) && !!value.trim() && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+}
+
+function namesEnabled(directory: string): boolean {
+  try {
+    const fd = openSync(join(directory, ".names-enabled"), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const info = fstatSync(fd);
+      if (!info.isFile() || info.uid !== uid() || (info.mode & 0o7777) !== 0o600 || info.nlink !== 1 || info.size !== 2) return false;
+      const bytes = Buffer.alloc(3);
+      return readSync(fd, bytes, 0, 3, 0) === 2 && bytes[0] === 49 && bytes[1] === 10;
+    } finally { closeSync(fd); }
+  } catch { return false; }
 }
 
 function terminalOutcome(messages: unknown): Outcome | null {
@@ -106,7 +123,7 @@ function generatedRecord(record: unknown, id: string): record is NativeRecord {
       !("schema_version" in record) || !("reporter_id" in record) || !("pane_id" in record) ||
       !("session_id" in record) || !("updated_at_ms" in record) || !("status" in record) ||
       !("run_id" in record) || !("background_jobs" in record) || !("health" in record)) return false;
-  return Object.keys(record).length === 9 + ("model" in record ? 1 : 0) + ("effort" in record ? 1 : 0) + ("outcome" in record ? 1 : 0) + ("input_id" in record ? 1 : 0) &&
+  return Object.keys(record).length === 9 + ("model" in record ? 1 : 0) + ("effort" in record ? 1 : 0) + ("outcome" in record ? 1 : 0) + ("input_id" in record ? 1 : 0) + ("session_name" in record ? 1 : 0) &&
     record.schema_version === 1 && record.reporter_id === id &&
     safeInteger(record.pane_id) && record.pane_id > 0 &&
     typeof record.session_id === "string" && record.session_id.length > 0 && record.session_id.length <= 128 &&
@@ -115,6 +132,7 @@ function generatedRecord(record: unknown, id: string): record is NativeRecord {
     (record.health === "ready" || record.health === "unsupported") &&
     (!("model" in record) || record.model === null || metadataScalar(record.model)) &&
     (!("effort" in record) || record.effort === null || metadataScalar(record.effort)) &&
+    (!("session_name" in record) || record.session_name === null || (record.health === "ready" && sessionNameScalar(record.session_name))) &&
     (!("outcome" in record) || record.outcome === null ||
       (["completed", "failed", "cancelled"].includes(record.outcome as string) &&
        record.health === "ready" && record.status === "done" && record.run_id !== null &&
@@ -263,6 +281,7 @@ export default function haTty7Status(pi: ExtensionAPI): void {
       session_id: reporter.session, updated_at_ms: Date.now(), status,
       run_id: health === "ready" ? run : null, background_jobs: jobs, health,
       model, effort,
+      session_name: null as string | null,
       outcome: health === "ready" && status === "done" ? terminal : null,
       input_id: health === "ready" && status === "waiting" ? inputId : null,
     };
@@ -271,6 +290,13 @@ export default function haTty7Status(pi: ExtensionAPI): void {
       if (statusDirectory() !== owner.directory) return;
       const path = join(owner.directory, `${owner.id}.json`);
       const publish = () => {
+        // Read private label metadata only under the same lock as policy revocation.
+        if (health === "ready" && namesEnabled(owner.directory)) {
+          try {
+            const name = context!.sessionName();
+            if (sessionNameScalar(name)) record.session_name = name;
+          } catch { /* An optional getter cannot alter lifecycle status. */ }
+        }
         let temporary: string | undefined = join(owner.directory, `.${owner.id}-${randomUUID()}.tmp`);
         try {
           const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -320,6 +346,7 @@ export default function haTty7Status(pi: ExtensionAPI): void {
       agent: ctx.agent,
       get model() { return ctx.model; },
       sessionId: () => ctx.sessionManager.getSessionId(),
+      sessionName: () => ctx.sessionManager.getSessionName(),
       isIdle: typeof ctx.isIdle === "function" ? ctx.isIdle.bind(ctx) : undefined,
       hasPendingMessages: typeof ctx.hasPendingMessages === "function" ? ctx.hasPendingMessages.bind(ctx) : undefined,
       getAsyncJobSnapshot: typeof ctx.getAsyncJobSnapshot === "function" ? ctx.getAsyncJobSnapshot.bind(ctx) : undefined,

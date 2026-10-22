@@ -7,6 +7,7 @@ export interface OmpSource {
   background_jobs: number | null;
   outcome?: 'completed' | 'failed' | 'cancelled' | null;
   input_id?: string | null;
+  session_name?: string | null;
 }
 export const DEFAULT_STATUSES: readonly AgentStatus[] = ['idle', 'working', 'waiting', 'done'];
 export const INFORMATION_OPTIONS = [

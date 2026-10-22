@@ -8,7 +8,7 @@ import { formatTimestamp } from './datetime';
 import './editor';
 import type { HaTty7CardEditor } from './editor';
 import { discoverHosts } from './discovery';
-import { filterAgents, origin, selectRepresentative, tabForPane, tabViews, workspaceViews } from './inventory';
+import { filterAgents, nativeSessionName, origin, selectRepresentative, tabForPane, tabViews, workspaceViews } from './inventory';
 import { localize } from './localize';
 import type { MessageKey } from './localize';
 
@@ -61,7 +61,8 @@ export class HaTty7Card extends LitElement {
     const statusLabel = `${this.t(agent.status)}${agent.inferred === true ? ` (${this.t('inferred')})` : ''}`;
     const tab = tabForPane(host.inventory, agent.pane_id);
     const pane = host.inventory?.panes.find(item => item.pane_id === agent.pane_id);
-    const title = tab?.name ?? tab?.label ?? agent.agent;
+    const nativeName = nativeSessionName(host, agent);
+    const title = (tab?.name?.trim() ? tab.name : null) ?? nativeName ?? (tab?.label?.trim() ? tab.label : null) ?? agent.agent;
     const model = agent.model ?? this.t('not_reported');
     const effort = agent.effort === '' ? this.t('none_applicable') : agent.effort ?? this.t('not_reported');
     const showModel = this.config?.show_model === true && agent.model !== null && agent.model.trim().length > 0;
@@ -93,7 +94,7 @@ export class HaTty7Card extends LitElement {
         <span class="agent-copy"><span class="agent-name">${title}</span>
           ${identity.length ? html`<span class="identity">${identity.join(' · ')}</span>` : nothing}
           ${showModel || showEffort ? html`<span class="metadata">${showModel ? html`${this.t('model')}: ${model}` : nothing}${showModel && showEffort ? ' · ' : nothing}${showEffort ? html`${this.t('effort')}: ${effort}` : nothing}</span>` : nothing}
-          ${this.config?.show_derived_label && tab?.label && !tab.name ? html`<span class="metadata">${this.t('derived')}</span>` : nothing}
+          ${this.config?.show_derived_label && (nativeName || tab?.label) && !tab?.name?.trim() ? html`<span class="metadata">${this.t('derived')}</span>` : nothing}
           ${this.config?.show_lifecycle && (pane?.hibernated || pane?.orphan || pane?.live === false) ? html`<span class="metadata">${pane.hibernated ? this.t('hibernated') : ''} ${pane.orphan ? this.t('orphan') : ''} ${pane.live === false ? this.t('not_live') : ''}</span>` : nothing}
         </span>
         <span class="status" data-status=${agent.status}><span class="dot" aria-hidden="true"></span>${statusLabel}</span>
@@ -111,13 +112,14 @@ export class HaTty7Card extends LitElement {
     if (!this.tabVisible(view)) return nothing;
     const visible = filterAgents(view.agents, this.config!);
     const selected = selectRepresentative(visible);
+    const nativeName = nativeSessionName(host, selected);
     return html`<li class="tab-group" data-tab=${view.tab.tab_id}>
-      <div class="group-head"><h3>${view.tab.name ?? view.tab.label ?? `${this.t('tab')} ${view.tab.ordinal ?? view.tab.tab_id}`}</h3>
+      <div class="group-head"><h3>${(view.tab.name?.trim() ? view.tab.name : null) ?? nativeName ?? (view.tab.label?.trim() ? view.tab.label : null) ?? `${this.t('tab')} ${view.tab.ordinal ?? view.tab.tab_id}`}</h3>
         ${selected ? html`<span>${this.config?.show_agent_type ? `${selected.agent} · ` : ''}${this.t(selected.status)}${selected.inferred ? ` (${this.t('inferred')})` : ''}</span>`
           : html`<span>${this.config?.show_agent_type && view.tab.detected_agent ? `${view.tab.detected_agent} · ` : ''}${this.t('unknown')}${this.config?.show_agent_type && view.tab.detected_agent ? ` · ${this.t('detected_only')}` : ''}</span>`}
         ${this.config?.show_lifecycle && view.tab.hibernated ? html`<span>${this.t('hibernated')}</span>` : nothing}
         ${this.config?.show_group_name && view.tab.group_name ? html`<span>${view.tab.group_name}</span>` : nothing}
-        ${this.config?.show_derived_label && !view.tab.name && view.tab.label ? html`<span>${this.t('derived')}</span>` : nothing}
+        ${this.config?.show_derived_label && !view.tab.name?.trim() && (nativeName || view.tab.label) ? html`<span>${this.t('derived')}</span>` : nothing}
       </div>
       ${visible.length ? html`<ul>${repeat(visible, agent => agent.identity, agent => this.renderAgent(agent, host))}</ul>` : nothing}
     </li>`;

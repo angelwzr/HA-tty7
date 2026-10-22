@@ -10,7 +10,7 @@ from pathlib import Path
 import stat
 import time
 from typing import cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from .protocol import AgentRecord, MAX_AGENTS, MAX_SAFE_INTEGER, OmpOutcome, OmpState, OmpStatus, Status
 
@@ -22,7 +22,7 @@ _REQUIRED_FIELDS = frozenset({
     "schema_version", "reporter_id", "pane_id", "session_id", "updated_at_ms",
     "status", "run_id", "background_jobs", "health",
 })
-_FIELDS = _REQUIRED_FIELDS | {"model", "effort", "outcome", "input_id"}
+_FIELDS = _REQUIRED_FIELDS | {"model", "effort", "outcome", "input_id", "session_name"}
 _STATUSES = frozenset({"idle", "working", "waiting", "done", "unknown"})
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -41,6 +41,7 @@ class _NativeRecord:
     effort: str | None
     outcome: OmpOutcome | None
     input_id: str | None
+    session_name: str | None
 
 
 def _integer(value: object, *, positive: bool = False) -> int:
@@ -65,6 +66,14 @@ def _metadata(value: object) -> str | None:
     return text
 
 
+def _session_name(value: object) -> str | None:
+    if (not isinstance(value, str) or not 1 <= len(value) <= 256 or not value.strip()
+            or any(ord(char) < 32 or 127 <= ord(char) <= 159
+                   or 0xD800 <= ord(char) <= 0xDFFF for char in value)):
+        return None
+    return value
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict:
     result: dict = {}
     for key, value in pairs:
@@ -74,7 +83,7 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
-def _parse(body: bytes, reporter_id: str) -> _NativeRecord:
+def _parse(body: bytes, reporter_id: str, *, for_pruning: bool = False) -> _NativeRecord:
     data = json.loads(body.decode("utf-8"), object_pairs_hook=_unique_object)
     if (not isinstance(data, dict) or not _REQUIRED_FIELDS <= data.keys() <= _FIELDS
             or type(data["schema_version"]) is not int or data["schema_version"] != 1
@@ -84,6 +93,9 @@ def _parse(body: bytes, reporter_id: str) -> _NativeRecord:
     health = data["health"]
     if (not isinstance(status, str) or status not in _STATUSES
             or not isinstance(health, str) or health not in {"ready", "unsupported"}):
+        raise ValueError("invalid native record")
+    if for_pruning and data.get("session_name") is not None and (
+            health != "ready" or _session_name(data["session_name"]) is None):
         raise ValueError("invalid native record")
     run_id = None if data["run_id"] is None else _identifier(data["run_id"])
     background_jobs = _integer(data["background_jobs"])
@@ -108,6 +120,7 @@ def _parse(body: bytes, reporter_id: str) -> _NativeRecord:
         effort=_metadata(data.get("effort")),
         outcome=cast(OmpOutcome | None, outcome),
         input_id=input_id,
+        session_name=_session_name(data.get("session_name")) if health == "ready" else None,
     )
 
 
@@ -134,7 +147,82 @@ def _safe_record(info: os.stat_result) -> bool:
             and stat.S_IMODE(info.st_mode) == 0o600 and info.st_size <= _MAX_RECORD_BYTES)
 
 
-def _read_record(fd: int, name: str) -> tuple[_NativeRecord, os.stat_result]:
+
+def _reconcile_names(directory: Path, enabled: bool) -> bool:
+    """Publish consent under the reporter lock; any failure denies outbound names."""
+    fd = lock_fd = None
+    temporary = None
+    try:
+        fd = _open_directory(directory)
+        lock_fd = os.open(
+            ".publish.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            0o600, dir_fd=fd,
+        )
+        lock_info = os.fstat(lock_fd)
+        if not _safe_record(lock_info) or lock_info.st_nlink != 1:
+            return False
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        marker = ".names-enabled"
+        try:
+            marker_fd = os.open(marker, _FILE_FLAGS, dir_fd=fd)
+        except FileNotFoundError:
+            if not enabled:
+                return False
+        else:
+            try:
+                info = os.fstat(marker_fd)
+                if (not _safe_record(info) or info.st_nlink != 1 or info.st_size != 2
+                        or os.read(marker_fd, 3) != b"1\n"):
+                    return False
+                current = os.stat(marker, dir_fd=fd, follow_symlinks=False)
+                if (current.st_dev, current.st_ino, current.st_mtime_ns, current.st_size) != (
+                        info.st_dev, info.st_ino, info.st_mtime_ns, info.st_size):
+                    return False
+                if enabled:
+                    return True
+                os.unlink(marker, dir_fd=fd)
+                return False
+            finally:
+                os.close(marker_fd)
+        name = f".names-{uuid4()}.tmp"
+        temporary_fd = os.open(
+            name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600, dir_fd=fd,
+        )
+        temporary = name
+        try:
+            info = os.fstat(temporary_fd)
+            if not _safe_record(info) or info.st_nlink != 1 or os.write(temporary_fd, b"1\n") != 2:
+                return False
+            os.fsync(temporary_fd)
+        finally:
+            os.close(temporary_fd)
+        # Do not replace a foreign entry created since the missing-file check.
+        try:
+            os.stat(marker, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            return False
+        os.replace(temporary, marker, src_dir_fd=fd, dst_dir_fd=fd)
+        temporary = None
+        return True
+    except (OSError, ValueError):
+        return False
+    finally:
+        if temporary is not None and fd is not None:
+            try:
+                os.unlink(temporary, dir_fd=fd)
+            except OSError:
+                pass
+        if lock_fd is not None:
+            os.close(lock_fd)
+        if fd is not None:
+            os.close(fd)
+
+def _read_record(
+    fd: int, name: str, *, for_pruning: bool = False,
+) -> tuple[_NativeRecord, os.stat_result]:
     reporter = name[:-5]
     if str(UUID(reporter)) != reporter:
         raise ValueError("invalid native filename")
@@ -147,7 +235,7 @@ def _read_record(fd: int, name: str) -> tuple[_NativeRecord, os.stat_result]:
             body = stream.read(_MAX_RECORD_BYTES + 1)
         if len(body) > _MAX_RECORD_BYTES:
             raise ValueError("invalid native file")
-        return _parse(body, reporter), info
+        return _parse(body, reporter, for_pruning=for_pruning), info
     finally:
         os.close(file_fd)
 
@@ -171,7 +259,7 @@ def _prune(
         # Reporters hold this same inode shared during publication/shutdown.
         # Closing this descriptor releases our exclusive flock, including errors.
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        record, current = _read_record(fd, name)
+        record, current = _read_record(fd, name, for_pruning=True)
         observed_ms = int(time.time() * 1000) if now_ms is None else now_ms
         if (observed_ms - record.updated_at_ms >= _PRUNE_MS
                 and (current.st_dev, current.st_ino, current.st_mtime_ns, current.st_size)
@@ -234,7 +322,9 @@ def _load(directory: Path, now_ms: int | None) -> tuple[OmpState, dict[int, list
     return "missing", fresh, stale
 
 
-def _overlay(row: AgentRecord, state: OmpState, native: _NativeRecord | None) -> AgentRecord:
+def _overlay(
+    row: AgentRecord, state: OmpState, native: _NativeRecord | None, include_session_names: bool,
+) -> AgentRecord:
     result = row.copy()
     # Stock sessions/status/counters/metadata can belong to a child, never a fallback.
     result.pop("inferred", None)
@@ -248,11 +338,14 @@ def _overlay(row: AgentRecord, state: OmpState, native: _NativeRecord | None) ->
         result["omp"] = OmpStatus(state="ready", run_id=native.run_id,
                                   background_jobs=native.background_jobs,
                                   outcome=native.outcome, input_id=native.input_id)
+        if include_session_names and native.session_name is not None:
+            result["omp"]["session_name"] = native.session_name
     return result
 
 
 def apply_native_status(
     agents: list[AgentRecord], *, directory: Path | None = None, now_ms: int | None = None,
+    include_session_names: bool = False,
 ) -> list[AgentRecord]:
     """Overlay every OMP pane each poll; no opt-in or stock-state fallback.
 
@@ -261,6 +354,7 @@ def apply_native_status(
     """
     if directory is None:
         directory = Path.home() / ".local" / "share" / "ha-tty7" / "omp-status"
+    include_session_names = _reconcile_names(directory, include_session_names)
     default, fresh, stale = _load(directory, now_ms)
     stock_panes = {row["pane_id"] for row in agents}
     rows = list(agents)
@@ -280,6 +374,6 @@ def apply_native_status(
             state = "ready" if native.health == "ready" else "unsupported"
         else:
             state = "stale" if row["pane_id"] in stale else default
-        result.append(_overlay(row, state, native))
+        result.append(_overlay(row, state, native, include_session_names))
     result.sort(key=lambda row: row["pane_id"])
     return result

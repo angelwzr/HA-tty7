@@ -76,8 +76,9 @@ def collect_report(
     config: CollectorConfig, *, sampler: Sampler | None = None, now: float | None = None,
 ) -> Snapshot | ErrorReport:
     """Read a fresh roster, keeping optional failures scoped to their sections."""
+    include_session_names = config.collect_inventory and config.include_names and config.include_derived_labels
     try:
-        agents = apply_native_status(read_agents(config))
+        agents = apply_native_status(read_agents(config), include_session_names=include_session_names)
         if sampler is None:
             sampler = Sampler()
         sampler.sample(config, time.monotonic() if now is None else now)
@@ -99,6 +100,8 @@ def collect_report(
             encode_report(report)
         return report
     except (CollectorError, PayloadError) as error:
+        if not include_session_names:
+            apply_native_status([], include_session_names=False)
         return build_error(config.host_id, error.code, inventory_privacy={
             "enabled": config.collect_inventory,
             "names_included": config.include_names,

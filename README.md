@@ -48,9 +48,9 @@ The browser reads Home Assistant entities only. There is **no MQTT broker, separ
 
 Display support and notification support are different. Detection alone does not prove that a main run has genuinely finished.
 
-| Agent | Status and metadata source | Notifications in 0.4.5 |
+| Agent | Status and metadata source | Notifications in 0.4.6 |
 | --- | --- | --- |
-| Oh My Pi | Managed native extension; main-session status, selected model/thinking level and owner-scoped background work | Confirmed finishes, blocking questions/approvals and terminal failures |
+| Oh My Pi | Managed native extension; main-session status, selected model/thinking level, owner-scoped background work and opt-in full session name | Confirmed finishes, blocking questions/approvals and terminal failures |
 | Claude Code | Stock tty7 integration; only metadata tty7 actually reports | Silent: stock-only status lacks the required event proof |
 | Codex | Stock tty7 integration; only metadata tty7 actually reports | Silent: stock-only status lacks the required event proof |
 | OpenCode | Stock tty7 integration; only metadata tty7 actually reports | Silent: stock-only status lacks the required event proof |
@@ -93,7 +93,7 @@ Download the pinned installer:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.5/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.6/install.py \
   --output install-ha-tty7.py
 ```
 
@@ -128,7 +128,9 @@ Apply the change by restarting only the collector:
 systemctl --user restart ha-tty7.service
 ```
 
-Explicit tab names take precedence. Derived fallback labels need separate consent with `include_derived_labels = true`; those labels can contain directory names or terminal-derived text. Persisting inventory across HA restarts is another opt-in: **HA-tty7 → Configure → Retain inventory**.
+Explicit tab names take precedence. Automatic labels and native OMP session names need separate consent with `include_derived_labels = true`; those labels can contain directory names or generated session descriptions. With all three naming settings enabled, OMP's full name comes from its public API rather than tty7's 40-character CLI label. The collector grants local name sampling through a private marker; disabling consent stops name sampling/export. Persisting inventory or native names across HA restarts is another opt-in: **HA-tty7 → Configure → Retain inventory**.
+
+**Still seeing an ellipsis after expanding?** Stock tty7 26.10.0 truncates automatic JSON labels to 40 characters. The 0.4.6 native reporter avoids that limit for OMP names up to 256 Unicode characters. Existing OMP sessions need `/restart` after their work finishes to load this new source; other agents retain whatever title their stock source provides.
 
 ## Notifications
 

@@ -1,6 +1,6 @@
 # Install HA-tty7
 
-> Use matching 0.4.5 integration and collector versions. Update/restart HA first, then run the reporter installer. Existing OMP processes need `/restart` only when their managed extension changes. The 0.4.5 title-layout fix does not change the 0.4.4 extension or notification templates.
+> Use matching 0.4.6 integration and collector versions. Update/restart HA first, then run the reporter installer. Existing OMP processes need `/restart` after work finishes to load native full-name reporting. Notification templates and status rules are unchanged.
 
 ## Home Assistant
 
@@ -20,7 +20,7 @@ Download the pinned installer, review it, then run it:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.5/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.6/install.py \
   --output install-ha-tty7.py
 python3 install-ha-tty7.py
 ```
@@ -88,6 +88,10 @@ Child sessions never own pane status or metadata. Native records carry optional 
 
 The selected model (`provider/id`) and thinking level come from public `ctx.model` and `pi.getThinkingLevel()` on every native sample. Model and thinking-only changes refresh in place without a new run or notification. Literal `off` remains `off`; missing/throwing/invalid metadata getters produce null without breaking healthy status. Native values, including null, never fall back to another agent's stock metadata. Older status-only native records remain valid but cannot supply these new fields until the OMP process restarts with the updated extension.
 
+Full OMP names come from public `ctx.sessionManager.getSessionName()`, not tty7's 40-character `tab ls` label. Collection requires all three settings: `collect_inventory`, `include_names`, and `include_derived_labels`. The collector creates an owned single-link 0600 `.names-enabled` marker containing exactly `1` followed by a newline in the private status directory; absent or unsafe markers deny the getter and local name publication. Revocation uses the publication lock and immediately suppresses outbound names, even if a failed local cleanup must be retried. Names refresh on heartbeat without a new run or alert. They are optional nullable scalars, at most 256 Unicode characters with no controls; invalid/oversized names become unavailable, never silently truncated or a status failure.
+
+Display and notification precedence is explicit tab name, approved ready native session name, then approved stock label. Both require the existing sound inventory membership/consent checks; a split-tab heading uses its selected visible representative. Native names are private label data: default restoration storage strips them, and opt-out/error revocation clears last-known values. Older reporters remain readable but cannot supply the missing full title until their OMP runtime restarts. Other agents retain stock labels.
+
 The credential-free OMP extension writes exact scalar records into `~/.local/share/ha-tty7/omp-status/`: directory 0700, files 0600, atomic publication, two-second heartbeat and ten-second freshness. A permanent private lock coordinates publication and expired-record cleanup; it is not a network listener. No messages, tool arguments/results, command lines or job labels are written. The Python collector alone holds the pairing URL and sends the existing verified HTTPS reports.
 
 The lifecycle contract is checked against public OMP 18.12.5 APIs; unavailable APIs report Unknown. Only structured envelope role/stop-reason metadata is inspected, never message content or error text. An ambiguous failed-or-cancelled retry remains unproven and silent. Stock-only agent states and older native records without proof cannot trigger alerts. This does not repair tty7's own GUI status/desktop notification hooks. To avoid duplicate phone pushes, choose either HA Companion notifications or forwarded OMP/tty7 desktop notifications—not both. Installation does not silently rewrite OS notification settings.
@@ -148,11 +152,11 @@ Session/turn timestamps, token/context/cost values and GUI-local unread state ar
 
 Open **Settings → Devices & services → HA-tty7 → Configure**. Edit **Notification title template** and **Notification message template**, then finish the settings flow.
 
-Default title: `{session_name}`. Default message: `{event_message}`. These render the approved session/tab label and exactly **Finished.**, **Needs your input.**, or **Failed.** No host, agent type or pane/session ID is added. Names require existing collection consent; missing, stale or unapproved names become **Unnamed session**. Explicit tab names win over separately approved derived labels.
+Default title: `{session_name}`. Default message: `{event_message}`. These render the approved session/tab label and exactly **Finished.**, **Needs your input.**, or **Failed.** No host, agent type or pane/session ID is added. Names require existing collection consent; missing, stale or unapproved names become **Unnamed session**. Explicit tab names win over separately approved native full names and stock derived labels.
 
 | Placeholders | Meaning |
 | --- | --- |
-| `{session_name}` | Approved fresh, uniquely joined tab name, then separately approved derived label; otherwise `Unnamed session` |
+| `{session_name}` | Approved fresh, uniquely joined tab name, then native OMP full name or stock label with derived consent; otherwise `Unnamed session` |
 | `{event_message}` | `Finished.`, `Needs your input.`, or `Failed.` |
 | `{host_label}`, `{host_id}` | Configured source label/identity |
 | `{agent}`, `{pane_id}`, `{session_id}`, `{status}` | Actual event metadata |
