@@ -931,6 +931,7 @@ const He = Nt`
   svg { width: 16px; height: 16px; }
   .agent-copy { min-width: 0; display: grid; gap: 3px; }
   .agent-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-row[aria-expanded='true'] .agent-name { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
   .identity { font-size: 12px; color: var(--tty-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-variant-numeric: tabular-nums; }
   .status { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; white-space: nowrap; }

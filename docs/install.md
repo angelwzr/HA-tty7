@@ -1,6 +1,6 @@
 # Install HA-tty7
 
-> Use matching 0.4.4 integration and collector versions. Update/restart HA first, then run the reporter installer. Existing OMP processes need `/restart` after their work finishes. A release does not authorize deployment to a household instance.
+> Use matching 0.4.5 integration and collector versions. Update/restart HA first, then run the reporter installer. Existing OMP processes need `/restart` only when their managed extension changes. The 0.4.5 title-layout fix does not change the 0.4.4 extension or notification templates.
 
 ## Home Assistant
 
@@ -20,7 +20,7 @@ Download the pinned installer, review it, then run it:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.4/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.5/install.py \
   --output install-ha-tty7.py
 python3 install-ha-tty7.py
 ```

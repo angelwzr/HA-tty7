@@ -17,7 +17,7 @@ It is **read-only monitoring**, not a remote terminal: you cannot send prompts, 
 ## What you get
 
 - **One view across hosts.** Compact session rows, host availability, and optional workspace/tab grouping.
-- **Useful details on demand.** Expand a row for reported model, thinking level, source quality and other available metadata. Extra information is opt-in, not clutter in every row.
+- **Useful details on demand.** Tap or click a row to wrap its full session name and reveal reported model, thinking level, source quality and other available metadata. Collapsed rows stay compact.
 - **Notifications that identify the work.** The approved session/tab name is the title; the message says “Finished.”, “Needs your input.” or “Failed.” Only sources with reliable event proof can notify.
 - **Home Assistant integration.** Roster, connectivity and diagnostic entities; a bundled Lovelace card with a visual editor; native-theme or tty7-style appearance and English/Russian labels.
 - **Explicit source health.** Stale, disconnected, missing and unknown data stay distinguishable from a healthy idle session or an empty roster.
@@ -48,7 +48,7 @@ The browser reads Home Assistant entities only. There is **no MQTT broker, separ
 
 Display support and notification support are different. Detection alone does not prove that a main run has genuinely finished.
 
-| Agent | Status and metadata source | Notifications in 0.4.4 |
+| Agent | Status and metadata source | Notifications in 0.4.5 |
 | --- | --- | --- |
 | Oh My Pi | Managed native extension; main-session status, selected model/thinking level and owner-scoped background work | Confirmed finishes, blocking questions/approvals and terminal failures |
 | Claude Code | Stock tty7 integration; only metadata tty7 actually reports | Silent: stock-only status lacks the required event proof |
@@ -93,7 +93,7 @@ Download the pinned installer:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.4/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.5/install.py \
   --output install-ha-tty7.py
 ```
 
@@ -111,7 +111,7 @@ For a private CA, use `--ca-file /path/to/ca.pem`. Nonstandard tty7 paths and ma
 
 Edit a Home Assistant dashboard, choose **Add card → HA-tty7**, and select your hosts in the visual editor. The integration serves and registers the card; no manual JavaScript resource copying is needed.
 
-Start with compact rows. Enable model/effort, grouping, additional details or Unknown rows only when useful. [All card options](card/README.md#configuration)
+Start with compact rows. Tap a session to read its full name across multiple lines; tap again to collapse it. Keyboard users can focus a row and press Enter or Space. Enable model/effort, grouping, additional details or Unknown rows only when useful. [All card options](card/README.md#configuration)
 
 ### 4. Enable session/tab names
 

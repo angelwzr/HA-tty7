@@ -4,6 +4,18 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-10-22
+
+### Fixed
+
+- Expanded session rows now show their full names across multiple lines on mobile and desktop. Long unbroken names wrap without overlapping status or creating horizontal scrolling.
+- Collapsed rows retain their compact ellipsis; existing tap, click, Enter and Space interactions reveal or hide the full title. No hover-only control or extra setting is required.
+
+### Unchanged
+
+- Notification templates, event filtering, name privacy settings and the OMP extension are unchanged. This card-only fix does not require restarting OMP sessions.
+
+
 ### Documentation
 
 - Reworked the README with a product overview, data-flow diagram, agent/notification support matrix, installation walkthrough and privacy boundaries.
@@ -185,7 +197,8 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 - Bundled card, visual editor and automatic frontend loading.
 - Host-bound HTTPS ingestion, freshness handling, restoration and optional notifications.
 
-[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/angelwzr/HA-tty7/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/angelwzr/HA-tty7/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/angelwzr/HA-tty7/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/angelwzr/HA-tty7/compare/v0.4.1...v0.4.2
