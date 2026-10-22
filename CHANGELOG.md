@@ -4,6 +4,12 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 
 ## [Unreleased]
 
+### Documentation
+
+- Reworked the README with a product overview, data-flow diagram, agent/notification support matrix, installation walkthrough and privacy boundaries.
+- Added a screenshot of the actual card using synthetic session data, included in the public source export.
+- Corrected the installation guide's pinned installer URL to v0.4.4.
+
 ## [0.4.4] - 2026-10-22
 
 ### Changed

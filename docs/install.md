@@ -20,7 +20,7 @@ Download the pinned installer, review it, then run it:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.3/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.4/install.py \
   --output install-ha-tty7.py
 python3 install-ha-tty7.py
 ```
