@@ -28,12 +28,12 @@ It is **read-only monitoring**, not a remote terminal: you cannot send prompts, 
 flowchart LR
     accTitle: HA-tty7 monitoring data flow
     accDescr: The host collector combines stock tty7 metadata with the managed Oh My Pi native reporter, sends validated snapshots to Home Assistant over HTTPS, and Home Assistant supplies the dashboard and notifications.
-    tty7["Stock tty7 CLI"] --> collector["Host collector"]
-    omp["OMP public extension API"] --> cache["Private local status records"]
+    tty7["tty7 CLI"] --> collector["Collector"]
+    omp["OMP extension"] --> cache["Private records"]
     cache --> collector
-    collector -->|"Outbound HTTPS webhook"| integration["HA integration"]
+    collector -->|"HTTPS webhook"| integration["HA integration"]
     integration --> card["Dashboard card"]
-    integration --> alerts["HA / Companion notifications"]
+    integration --> alerts["Notifications"]
 ```
 
 The collector runs under your Linux user, normally as a **systemd user service**. It polls structured `tty7 --json agents` data and, when enabled, bounded workspace/tab/pane inventory. It sends allowlisted snapshots on changes and periodic heartbeats—not terminal output or a stream of conversations.
