@@ -141,6 +141,18 @@ describe('native host discovery and picker consumer', () => {
     await editor.updateComplete;
     expect(configs.at(-1)).toEqual({ type: 'custom:ha-tty7-card', hosts: [] });
   });
+  it.each(['appearance', 'group_by'])('clears optional native %s selection without losing other settings', async field => {
+    const editor = await mount({ type: 'custom:ha-tty7-card', hosts: [hostConfigs[0]],
+      title: 'Saved title', appearance: 'home-assistant', group_by: 'tab', show_model: true });
+    const configs = listen(editor);
+    change(editor, field, undefined);
+    await editor.updateComplete;
+    expect(configs).toHaveLength(1);
+    expect(configs[0]).not.toHaveProperty(field);
+    expect(configs[0]).toMatchObject({ hosts: [hostConfigs[0]], title: 'Saved title', show_model: true });
+    expect(configs[0]).toHaveProperty(field === 'appearance' ? 'group_by' : 'appearance');
+    expect(editor.shadowRoot!.querySelector('[role="alert"]')).toBeNull();
+  });
   it('never emits secrets, options or arbitrary registry data', async () => {
     const editor = await mount({ type: 'custom:ha-tty7-card', hosts: [{ ...hostConfigs[0], webhook_url: 'PRIVATE_PAIRING' }], options: { token: 'PRIVATE_TOKEN' } });
     const configs = listen(editor);

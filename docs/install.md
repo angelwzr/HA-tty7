@@ -1,8 +1,12 @@
 # Install HA-tty7
 
-> Use matching 0.4.6 integration and collector versions. Update/restart HA first, then run the reporter installer. Existing OMP processes need `/restart` after work finishes to load native full-name reporting. Notification templates and status rules are unchanged.
+> Use matching 0.4.7 integration and collector versions. Update/restart HA first, then run the reporter installer. This settings/theme update does not change the OMP extension or require another agent-session restart. Sessions still using a pre-0.4.6 reporter need the previously documented restart for native full names.
 
 ## Home Assistant
+
+[![Add via HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=angelwzr&repository=HA-tty7&category=integration)
+
+With HACS already installed, use the button to open HA-tty7 in your own instance and confirm the download. If the redirect is unavailable, use the manual custom-repository steps below.
 
 1. Add `https://github.com/angelwzr/HA-tty7` to **HACS → Custom repositories → Integration**. Install and restart HA.
 2. Open **Settings → Devices & services → Add integration → HA-tty7**. Enter a unique source ID, display label and verified HTTPS HA base URL.
@@ -20,7 +24,7 @@ Download the pinned installer, review it, then run it:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.6/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.7/install.py \
   --output install-ha-tty7.py
 python3 install-ha-tty7.py
 ```
@@ -139,6 +143,8 @@ The user service uses the paths above, umask 0077 and no new privileges. It open
 The default is host-first sorting with only host, tab/session title and status. Unknown-status rows are hidden; selecting Unknown in the status filter explicitly opts in. All auxiliary receipts, counts, metadata and annotations have independent off-by-default card settings. Editor text/select/boolean controls and buttons use native HA components. Explicit saved settings remain honored.
 
 Choose native HA or tty7 appearance and optional workspace/tab grouping. Multiple hosts are supported and sorted by display label with a stable roster-ID tie-break. Local filters affect only the view—not counts or alert baselines. English/Russian labels follow HA language; other languages fall back to English. Date/time follows HA profile preferences.
+
+Card settings and integration setup/options inherit Home Assistant's native controls, typography and theme variables. Installed custom themes apply without a plugin-specific palette or theme switch. The editor follows the active theme even when its preview uses tty7 appearance; choose **Home Assistant** appearance for the rendered card's surfaces and colors to follow the theme too. Clearing an optional native selector restores its existing default without losing other card settings.
 
 Grouping uses full source/workspace/tab IDs, not mutable names or ordinals. Split summaries keep agent and state from the same reported pane. Tab detection without lifecycle data stays **Unknown / Not reported**; it is not assigned to guessed panes. Orphans, hibernation and liveness remain separate from work state.
 

@@ -6,6 +6,10 @@ HA-tty7 connects [tty7](https://github.com/l0ng-ai/tty7) to Home Assistant so yo
 
 It is **read-only monitoring**, not a remote terminal: you cannot send prompts, approve tools, run commands, or stop sessions from the card.
 
+[![Add via HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=angelwzr&repository=HA-tty7&category=integration)
+
+The button opens this repository in your Home Assistant instance. HACS must already be installed; confirm the repository and download the integration there.
+
 [Installation](#installation) · [How it works](#how-it-works) · [Agent support](#agent-support) · [Notifications](#notifications) · [Releases](https://github.com/angelwzr/HA-tty7/releases)
 
 ## What it looks like
@@ -48,7 +52,7 @@ The browser reads Home Assistant entities only. There is **no MQTT broker, separ
 
 Display support and notification support are different. Detection alone does not prove that a main run has genuinely finished.
 
-| Agent | Status and metadata source | Notifications in 0.4.6 |
+| Agent | Status and metadata source | Notifications in 0.4.7 |
 | --- | --- | --- |
 | Oh My Pi | Managed native extension; main-session status, selected model/thinking level, owner-scoped background work and opt-in full session name | Confirmed finishes, blocking questions/approvals and terminal failures |
 | Claude Code | Stock tty7 integration; only metadata tty7 actually reports | Silent: stock-only status lacks the required event proof |
@@ -93,7 +97,7 @@ Download the pinned installer:
 
 ```sh
 curl --fail --show-error --location --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.6/install.py \
+  https://raw.githubusercontent.com/angelwzr/HA-tty7/v0.4.7/install.py \
   --output install-ha-tty7.py
 ```
 
@@ -112,6 +116,8 @@ For a private CA, use `--ca-file /path/to/ca.pem`. Nonstandard tty7 paths and ma
 Edit a Home Assistant dashboard, choose **Add card → HA-tty7**, and select your hosts in the visual editor. The integration serves and registers the card; no manual JavaScript resource copying is needed.
 
 Start with compact rows. Tap a session to read its full name across multiple lines; tap again to collapse it. Keyboard users can focus a row and press Enter or Space. Enable model/effort, grouping, additional details or Unknown rows only when useful. [All card options](card/README.md#configuration)
+
+The card editor and integration setup/options always use Home Assistant controls and the active theme, including installed custom themes. Choose **Home Assistant** appearance for the rendered card to follow that theme too; the optional **tty7** appearance deliberately keeps its own palette. No global theme or saved appearance is overwritten.
 
 ### 4. Enable session/tab names
 

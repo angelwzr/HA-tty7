@@ -4,7 +4,7 @@ from homeassistant.const import Platform
 from .template import DEFAULT_MESSAGE_TEMPLATE, DEFAULT_TITLE_TEMPLATE
 
 DOMAIN = "ha_tty7"
-VERSION = "0.4.6"
+VERSION = "0.4.7"
 PLATFORMS = (Platform.SENSOR, Platform.BINARY_SENSOR)
 CONF_HOST_ID = "host_id"
 CONF_LABEL = "label"

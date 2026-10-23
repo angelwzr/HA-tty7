@@ -20,7 +20,7 @@ from urllib.request import HTTPRedirectHandler, build_opener
 import warnings
 import zipfile
 
-VERSION = "0.4.6"
+VERSION = "0.4.7"
 WHEEL_NAME = f"ha_tty7-{VERSION}-py3-none-any.whl"
 WHEEL_URL = f"https://github.com/angelwzr/HA-tty7/releases/download/v{VERSION}/{WHEEL_NAME}"
 MAX_WHEEL_BYTES = 32 * 1024 * 1024
@@ -212,7 +212,7 @@ def validate_wheel(path: Path) -> None:
             names, versions = metadata.get_all("Name", []), metadata.get_all("Version", [])
             if (len(names) != 1 or re.sub(r"[-_.]+", "-", names[0]).lower() != "ha-tty7"
                     or versions != [VERSION]):
-                raise InstallError("Wheel distribution Name/Version must be ha-tty7 0.4.6.")
+                raise InstallError("Wheel distribution Name/Version must be ha-tty7 0.4.7.")
     except (OSError, zipfile.BadZipFile, KeyError, RuntimeError):
         raise InstallError("Cannot read a valid reporter release wheel.") from None
 
@@ -238,7 +238,7 @@ def download_wheel(destination: Path) -> None:
                     stream.write(chunk)
         destination.chmod(0o600)
     except (OSError, ValueError):
-        raise InstallError("Verified HTTPS release download failed; check the published v0.4.6 asset and network trust.") from None
+        raise InstallError("Verified HTTPS release download failed; check the published v0.4.7 asset and network trust.") from None
 
 
 def check_venv(paths: Paths) -> None:
@@ -284,8 +284,8 @@ def install_wheel(paths: Paths, wheel: Path) -> None:
              "--no-deps", "--no-cache-dir", "--disable-pip-version-check", "--only-binary=:all:", str(wheel)],
             "Pinned reporter wheel installation failed.", timeout=180)
     command([str(paths.python), "-I", "-c",
-             "from importlib.metadata import version; assert version('ha-tty7') == '0.4.6'"],
-            "Installed reporter distribution is not version 0.4.6.")
+             "from importlib.metadata import version; assert version('ha-tty7') == '0.4.7'"],
+            "Installed reporter distribution is not version 0.4.7.")
 
 def install_omp_extension(paths: Paths) -> None:
     command([str(paths.python), "-I", "-m", "ha_tty7.omp_install", "--home", str(paths.home)],
@@ -343,7 +343,7 @@ def verify_source(paths: Paths) -> None:
 
 def verify_delivery(paths: Paths) -> None:
     command([str(paths.python), "-I", "-m", "ha_tty7", "--config", str(paths.config), "--once"],
-            "Real roster delivery failed; update the HA integration to 0.4.6 and check pairing, verified TLS and stock tty7. Service was not enabled.", timeout=30)
+            "Real roster delivery failed; update the HA integration to 0.4.7 and check pairing, verified TLS and stock tty7. Service was not enabled.", timeout=30)
 
 
 def prepare_service_directory(paths: Paths) -> None:
@@ -395,7 +395,7 @@ def install(args: argparse.Namespace, *, home: Path | None = None) -> None:
     with tempfile.TemporaryDirectory(prefix="install-", dir=paths.data) as temporary:
         wheel = args.wheel.expanduser().absolute() if args.wheel is not None else Path(temporary) / WHEEL_NAME
         if args.wheel is None:
-            print("Downloading pinned reporter 0.4.6 over verified HTTPS.")
+            print("Downloading pinned reporter 0.4.7 over verified HTTPS.")
             download_wheel(wheel)
         validate_wheel(wheel)
         install_wheel(paths, wheel)
@@ -406,7 +406,7 @@ def install(args: argparse.Namespace, *, home: Path | None = None) -> None:
         tty7 = Path(raw["tty7_path"])
     prepare_config(paths, tty7, args.ca_file, args.tty7_config_dir)
     verify_source(paths)
-    print("Ensure the Home Assistant integration is updated to 0.4.6; verifying one real roster delivery.")
+    print("Ensure the Home Assistant integration is updated to 0.4.7; verifying one real roster delivery.")
     verify_delivery(paths)
     if args.no_service:
         print("Delivery verified. Manual mode: no service-manager action was performed.")
@@ -426,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
         "New setup prompts for Host ID and a hidden pairing HTTPS URL. Existing private configuration, "
         "pairing and privacy choices are preserved. No secret arguments, sudo or HA token. "
         "A real verified-HTTPS delivery is required, including in manual mode."))
-    parser.add_argument("--wheel", type=Path, help="Explicit local ha-tty7 0.4.6 wheel (offline package installation)")
+    parser.add_argument("--wheel", type=Path, help="Explicit local ha-tty7 0.4.7 wheel (offline package installation)")
     parser.add_argument("--tty7", type=Path, help="Stock tty7 CLI path; otherwise find tty7 on PATH")
     parser.add_argument("--ca-file", type=Path, help="Trusted PEM CA for new pairing; never disables TLS verification")
     parser.add_argument("--tty7-config-dir", type=Path, help="Stock tty7 server directory for new setup (not read by installer)")

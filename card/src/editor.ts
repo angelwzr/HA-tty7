@@ -18,16 +18,16 @@ function text(value: unknown, limit: number): string {
 
 export class HaTty7CardEditor extends LitElement {
   static override styles = css`
-    :host { display: block; color: var(--primary-text-color, #1c1c1e); }
+    :host { display: block; color: var(--primary-text-color); font-family: var(--ha-font-family-body); font-size: var(--ha-font-size-m); }
     * { box-sizing: border-box; }
-    p { line-height: 1.5; color: var(--secondary-text-color, #666); }
-    fieldset { min-width: 0; margin: 16px 0; padding: 12px; border: 1px solid var(--divider-color, #ddd); border-radius: 8px; }
-    legend { padding: 0 4px; }
-    ha-selector { display: block; min-width: 0; margin: 8px 0 12px; }
-    .pair { font-size: 12px; overflow-wrap: anywhere; }
-    a { color: var(--primary-color, #1f6bf0); display: inline-block; min-height: 44px; padding: 8px 0; }
-    .feedback { color: var(--error-color, #b3261e); }
-    .display-options { display: grid; gap: 12px; }
+    p { line-height: 1.5; color: var(--secondary-text-color); }
+    fieldset { min-width: 0; margin: var(--ha-space-4) 0; padding: var(--ha-space-3); border: 1px solid var(--outline-color); border-radius: var(--ha-border-radius-md); }
+    legend { padding: 0 var(--ha-space-1); font-weight: var(--ha-font-weight-medium); }
+    ha-selector { display: block; min-width: 0; margin: var(--ha-space-2) 0 var(--ha-space-3); }
+    .pair { font-size: var(--ha-font-size-s); overflow-wrap: anywhere; }
+    a { color: var(--primary-color); display: inline-block; min-height: 44px; padding: var(--ha-space-2) 0; }
+    .feedback { color: var(--error-color); }
+    .display-options { display: grid; gap: var(--ha-space-3); }
   `;
   private currentHass: HomeAssistant | undefined;
   private rows: HostRow[] = [];
@@ -120,14 +120,16 @@ export class HaTty7CardEditor extends LitElement {
 
   private appearanceChanged(event: CustomEvent<{ value: unknown }>): void {
     event.stopPropagation();
-    if (event.detail.value !== 'tty7' && event.detail.value !== 'home-assistant') return;
+    if (event.detail.value !== undefined && event.detail.value !== 'tty7' && event.detail.value !== 'home-assistant') return;
     this.appearance = event.detail.value;
     this.publish();
   }
   private presentationChanged(key: keyof PresentationConfig, value: unknown): void {
     try {
+      const next = { ...this.presentation, [key]: value };
+      if (value === undefined) delete next[key];
       const { type: _type, hosts: _hosts, ...presentation } = validateConfig({
-        type: 'custom:ha-tty7-card', hosts: [], ...this.presentation, [key]: value,
+        type: 'custom:ha-tty7-card', hosts: [], ...next,
       });
       this.presentation = presentation;
       this.publish();
@@ -157,11 +159,11 @@ export class HaTty7CardEditor extends LitElement {
     return html`
       <p>${this.t('editor_intro')}</p>
       <ha-selector data-field="title" .hass=${this.currentHass} .label=${this.t('card_title')}
-        .selector=${{ text: {} }} .value=${this.cardTitle}
+        .selector=${{ text: {} }} .value=${this.cardTitle} .required=${false}
         @value-changed=${this.titleChanged}></ha-selector>
       <ha-selector data-field="appearance" .hass=${this.currentHass} .label=${this.t('appearance')}
         .selector=${{ select: { options: [{ value: 'tty7', label: 'tty7' }, { value: 'home-assistant', label: 'Home Assistant' }],
-          mode: 'dropdown', custom_value: false } }} .value=${this.appearance ?? 'tty7'}
+          mode: 'dropdown', custom_value: false } }} .value=${this.appearance ?? 'tty7'} .required=${false}
         @value-changed=${this.appearanceChanged}></ha-selector>
       ${!hosts.length ? html`<p role="status">${this.t('missing_hosts')}
         <a href="/config/integrations">${this.t('settings_link')}</a>, ${this.t('saved_pairs')}</p>` : nothing}
@@ -190,19 +192,19 @@ export class HaTty7CardEditor extends LitElement {
       <fieldset class="display-options"><legend>${this.t('group_by')}</legend>
         <ha-selector data-field="group_by" .hass=${this.currentHass} .label=${this.t('group_by')}
           .selector=${{ select: { options: (['host', 'workspace', 'tab'] as const).map(group => ({ value: group, label: this.t(`group_${group}`) })),
-            mode: 'dropdown', custom_value: false } }} .value=${this.presentation.group_by ?? 'host'}
+            mode: 'dropdown', custom_value: false } }} .value=${this.presentation.group_by ?? 'host'} .required=${false}
           @value-changed=${(event: CustomEvent<{ value: unknown }>) => { event.stopPropagation(); this.presentationChanged('group_by', event.detail.value); }}></ha-selector>
         ${[...INFORMATION_OPTIONS, 'include_inferred' as const].map(key => html`
-          <ha-selector data-field=${key} .hass=${this.currentHass} .label=${this.t(key)} .selector=${{ boolean: {} }}
+          <ha-selector data-field=${key} .hass=${this.currentHass} .label=${this.t(key)} .selector=${{ boolean: {} }} .required=${false}
             .value=${this.presentation[key] ?? key === 'include_inferred'}
             @value-changed=${(event: CustomEvent<{ value: unknown }>) => { event.stopPropagation(); this.presentationChanged(key, event.detail.value); }}></ha-selector>`)}
         <ha-selector data-field="statuses" .hass=${this.currentHass} .label=${this.t('statuses')}
           .selector=${{ select: { options: STATUSES.map(status => ({ value: status, label: this.t(status) })),
-            mode: 'list', multiple: true, custom_value: false } }} .value=${this.presentation.statuses ?? DEFAULT_STATUSES}
+            mode: 'list', multiple: true, custom_value: false } }} .value=${this.presentation.statuses ?? DEFAULT_STATUSES} .required=${false}
           @value-changed=${(event: CustomEvent<{ value: unknown }>) => { event.stopPropagation(); this.presentationChanged('statuses', event.detail.value); }}></ha-selector>
         <ha-selector data-field="agent_types" .hass=${this.currentHass} .label=${this.t('agent_types')}
           .selector=${{ select: { options: this.presentation.agent_types ?? [], mode: 'dropdown', multiple: true, custom_value: true } }}
-          .value=${this.presentation.agent_types ?? []} .helper=${this.t('agent_types_help')}
+          .value=${this.presentation.agent_types ?? []} .helper=${this.t('agent_types_help')} .required=${false}
           @value-changed=${(event: CustomEvent<{ value: unknown }>) => { event.stopPropagation(); this.presentationChanged('agent_types', event.detail.value); }}></ha-selector>
       </fieldset>
     `;

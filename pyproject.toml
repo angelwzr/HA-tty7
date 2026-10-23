@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-tty7"
-version = "0.4.6"
+version = "0.4.7"
 description = "Read-only tty7 agent-status integration for Home Assistant"
 readme = "README.md"
 requires-python = ">=3.11"

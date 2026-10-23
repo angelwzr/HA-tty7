@@ -4,6 +4,25 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-10-23
+
+### Fixed
+
+- Card-editor groups, typography, spacing, borders and feedback now use native Home Assistant theme variables instead of fixed fallback colors and corner sizes.
+- Optional card fields no longer inherit the native selector's required-field default. Required host selections and labels retain their validation.
+- Native clear-selection actions now restore optional card defaults without dropping other saved settings.
+- Notification template examples in integration help text are escaped for HA's ICU formatter, preventing missing-translation-variable errors while leaving actual templates unchanged.
+
+### Added
+
+- Official My Home Assistant / HACS repository buttons in the README and installation guide, including the custom integration category.
+
+### Unchanged
+
+- Card controls remain native HA selectors/buttons; integration setup/options remain HA-owned forms. Saved card appearance, custom themes, pairing, privacy and notification settings are preserved.
+- The OMP extension and status/name collection behavior are unchanged; no agent-session restart is required for this settings update.
+
+
 ## [0.4.6] - 2026-10-22
 
 ### Fixed
@@ -217,7 +236,8 @@ Changes are grouped by release. **Unreleased** describes local work, not a publi
 - Bundled card, visual editor and automatic frontend loading.
 - Host-bound HTTPS ingestion, freshness handling, restoration and optional notifications.
 
-[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/angelwzr/HA-tty7/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/angelwzr/HA-tty7/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/angelwzr/HA-tty7/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/angelwzr/HA-tty7/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/angelwzr/HA-tty7/compare/v0.4.3...v0.4.4

@@ -60,6 +60,8 @@ Host entity mappings must be unique; display labels may repeat. Rosters must be 
 
 The editor uses native HA `ha-selector` controls throughout: text for title/labels, single-select dropdowns for appearance/hosts/grouping, boolean selectors for independent information flags and inferred reports, a multi-select status list, and a custom-value multi-select for exact agent types. Add/Remove use native `ha-button`. It emits standard bubbling/composed `config-changed` events, preserves focused drafts through HA config echoes, and never copies integration secrets/options. An empty host list is an unconfigured state, not a healthy empty roster.
 
+The editor's surrounding text, spacing, outline borders and corner sizes use Home Assistant theme variables; it follows the active light/dark or installed custom theme independently of the preview's appearance. Optional selectors are marked optional, and their native clear actions restore existing defaults while preserving other settings. Integration setup/options are rendered by HA's own forms. To theme the card itself, use `appearance: home-assistant`; `tty7` retains its deliberate palette, and neither mode changes global theme preferences.
+
 ## Reading the card
 
 The default is compact: card title, outer host headings and health, session/tab name and status. Hosts are always outer groups, ordered by display label then roster entity ID (fixed English collation); workspace/tab grouping is an explicit within-host choice. No auxiliary lines or empty metadata gaps appear until individually enabled.
